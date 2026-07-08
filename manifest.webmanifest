@@ -1,0 +1,21 @@
+{
+  "name": "Kanban",
+  "short_name": "Kanban",
+  "start_url": "./Kanban.html",
+  "display": "standalone",
+  "background_color": "#0f1117",
+  "theme_color": "#0f1117",
+  "description": "Um quadro Kanban local e integrado com Google Sheets.",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
