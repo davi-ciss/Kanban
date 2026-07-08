@@ -342,20 +342,21 @@
   #searchClear.show{display:block}
   #searchClear:hover{background:var(--col); color:var(--txt)}
 
-  /* ---------- SYNC HISTORY ---------- */
+  /* ---------- HISTORY PANELS ---------- */
   .sync-hist-btn{position:relative}
   .sync-hist-btn .h-badge{position:absolute; top:2px; right:2px; background:var(--red);
     width:8px; height:8px; border-radius:50%; border:2px solid var(--bg-2); display:none}
   .sync-hist-btn .h-badge.show{display:flex}
-  #syncHistPanel{position:fixed; z-index:60; background:var(--bg-2); border:1px solid var(--line);
+  #syncHistPanel, #actionHistPanel{position:fixed; z-index:60; background:var(--bg-2); border:1px solid var(--line);
     border-radius:14px; box-shadow:0 18px 50px -16px rgba(0,0,0,.6); width:420px; max-width:calc(100vw - 32px);
     display:none; animation:pop .12s ease; overflow:hidden}
-  #syncHistPanel.show{display:block}
+  #syncHistPanel.show, #actionHistPanel.show{display:block}
   .sh-head{display:flex; align-items:center; gap:10px; padding:13px 15px; border-bottom:1px solid var(--line)}
   .sh-head .ttl{font-weight:700; font-size:14px; flex:1}
   .sh-list{max-height:380px; overflow-y:auto; padding:6px}
-  .sh-list:empty::after{content:'Nenhuma sincronização registrada.'; display:block; text-align:center;
-    color:var(--txt-mut); font-size:12.5px; padding:24px 8px}
+  .sh-list:empty::after{display:block; text-align:center; color:var(--txt-mut); font-size:12.5px; padding:24px 8px}
+  #syncHistList:empty::after{content:'Nenhuma sincronização registrada.'}
+  #actionHistList:empty::after{content:'Nenhum histórico de ação registrado ainda.'}
   .sh-item{padding:9px 12px; border-radius:8px; display:flex; align-items:flex-start; gap:10px; font-size:12.5px;
     color:var(--txt-dim); margin-bottom:4px; border:1px solid transparent; transition:background .15s; cursor:pointer}
   .sh-item:hover{background:var(--col)}
@@ -411,6 +412,9 @@
       Filtrar<span class="badge" id="fltBadge" hidden></span>
     </button>
     <div id="syncPill" class="sync-pill" title="Status do vínculo com a planilha"><span class="s-dot"></span><span id="syncTxt">Sheets off</span></div>
+    <button class="tbtn action-hist-btn" id="actionHistBtn" title="Histórico Geral de Ações">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    </button>
     <button class="tbtn sync-hist-btn" id="syncHistBtn" title="Histórico de sincronizações">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
       <span class="h-badge" id="syncHistBadge"></span>
@@ -622,6 +626,19 @@
     <div class="sh-foot">
       <button id="syncHistClear">Limpar histórico</button>
     </div>
+    </div>
+  </div>
+
+  <!-- ACTION HISTORY PANEL -->
+  <div id="actionHistPanel">
+    <div class="sh-head">
+      <div class="ttl">Histórico Geral</div>
+      <button class="tbtn" id="actionHistClose" style="align-self:flex-start">✕</button>
+    </div>
+    <div class="sh-list" id="actionHistList"></div>
+    <div class="sh-foot">
+      <button id="actionHistClear">Limpar histórico</button>
+    </div>
   </div>
 
 <script>
@@ -649,6 +666,7 @@ if(!state.notes)  state.notes={folders:[{id:'nf1',name:'Geral',notes:[]}], activ
 if(!state.view)   state.view='board';
 if(!state.notesMode) state.notesMode='app';
 if(!state.syncLog) state.syncLog=[];
+if(!state.actionLog) state.actionLog=[];
 if(!state.autoBackup) state.autoBackup={enabled:false,freq:'daily',hours:4,time:'08:00',lastRun:0};
 let query='';
 
@@ -836,6 +854,7 @@ function addCard(colId, title){
   const card = {id:uid(), title, desc:'', ticket:'', cli:'', prio:'none', linked:sync, createdAt:Date.now()};
   col.cards.unshift(card);
   save(); render();
+  logAction('create', card.id, card.title, `Criada na coluna ${col.name}`);
   if(sync) pushCard(card, col.name);
 }
 function moveCard(id, fromCol, toCol, order){
@@ -846,6 +865,7 @@ function moveCard(id, fromCol, toCol, order){
   to.cards.push(card);
   to.cards.sort((a,b)=> order.indexOf(a.id)-order.indexOf(b.id));
   save(); render();
+  if(fromCol!==toCol) logAction('move', card.id, card.title, `Movida de ${from.name} para ${to.name}`);
   if(card.linked && fromCol!==toCol) pushStatus(card, to.name);
 }
 function addColumn(){
@@ -952,6 +972,7 @@ function saveCard(pushAfter){
     if(i>=0){ const [cd]=from.cards.splice(i,1); to.cards.push(cd); editing.colId=sel; }
   }
   save(); render();
+  logAction('edit', editing.card.id, editing.card.title, 'Tarefa editada/atualizada');
   if(editing.card.linked && state.endpoint){     // salvar/atualizar sempre sincroniza
     const col = state.cols.find(c=>c.id===editing.colId);
     pushCard(editing.card, col?col.name:'');
@@ -969,6 +990,7 @@ function delCard(){
   if(!confirm(aviso)) return;
   const col = state.cols.find(c=>c.id===editing.colId);
   col.cards = col.cards.filter(c=>c.id!==card.id); save(); render(); closeCard();
+  logAction('delete', card.id, card.title, `Excluída de ${col.name}`);
   if(synced){
     jsonp({action:'delete', key:card.rowKey||card.ticket, ticket:card.ticket})
       .then(r=>{
@@ -1182,10 +1204,46 @@ document.addEventListener('click',e=>{
   if(!e.target.closest('#filterPop') && !e.target.closest('#filterBtn')) $('#filterPop').classList.remove('show');
   if(!e.target.closest('#colorPop') && !e.target.classList.contains('col-dot')) $('#colorPop').classList.remove('show');
   if(!e.target.closest('#syncHistPanel') && !e.target.closest('#syncHistBtn')) $('#syncHistPanel').classList.remove('show');
+  if(!e.target.closest('#actionHistPanel') && !e.target.closest('#actionHistBtn')) $('#actionHistPanel').classList.remove('show');
 });
 
 let toastT;
 function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600); }
+
+// ---------- ACTION HISTORY ----------
+function logAction(type, cardId, title, detail){
+  state.actionLog.unshift({ id:uid(), type, cardId, title, detail, time:Date.now() });
+  if(state.actionLog.length>300) state.actionLog.length=300;
+  save();
+}
+function renderActionHist(){
+  const list=$('#actionHistList');
+  const icons={create:'＋',edit:'✎',move:'→',delete:'✕'};
+  list.innerHTML=state.actionLog.map(e=>{
+    return `<div class="sh-item" data-go="${e.cardId}">
+      <span class="sh-ico" style="font-weight:bold; font-size:14px">${icons[e.type]||'•'}</span>
+      <div class="sh-body"><div class="sh-title">${esc(e.title||'(sem título)')}</div><span class="sh-detail">${esc(e.detail||'')}</span></div>
+      <span class="sh-time">${fmtWhen(e.time)}</span></div>`;
+  }).join('');
+  list.querySelectorAll('.sh-item').forEach(el=>{
+    el.onclick=()=>{
+      const cid=el.dataset.go; if(!cid) return;
+      let found=false;
+      for(const col of state.cols){ if(col.cards.some(c=>c.id===cid)){ found=true; break; } }
+      if(!found){ toast('Tarefa não encontrada (pode ter sido excluída).'); return; }
+      $('#actionHistPanel').classList.remove('show');
+      if(state.view !== 'board') switchView('board');
+      setTimeout(()=>{
+        const cardEl=document.querySelector(`.card[data-id="${cid}"]`);
+        if(cardEl){
+          cardEl.scrollIntoView({behavior:'smooth', block:'center'});
+          cardEl.classList.add('flash-fx');
+          setTimeout(()=>cardEl.classList.remove('flash-fx'), 1400);
+        }
+      }, 50);
+    };
+  });
+}
 
 // ---------- SYNC HISTORY ----------
 function logSync(entry){
@@ -1220,7 +1278,7 @@ function renderSyncHist(){
       const cid=el.dataset.go; if(!cid) return;
       let found=false;
       for(const col of state.cols){ if(col.cards.some(c=>c.id===cid)){ found=true; break; } }
-      if(!found){ toast('Tarefa não encontrada no Kanban.'); return; }
+      if(!found){ toast('Tarefa não encontrada (pode ter sido excluída).'); return; }
       $('#syncHistPanel').classList.remove('show');
       if(state.view !== 'board') switchView('board');
       setTimeout(()=>{
@@ -1247,15 +1305,27 @@ function renderSyncHist(){
   });
 }
 $('#syncHistBtn').onclick=e=>{
-  e.stopPropagation(); const p=$('#syncHistPanel');
+  e.stopPropagation(); $('#actionHistPanel').classList.remove('show');
+  const p=$('#syncHistPanel');
   if(p.classList.contains('show')){p.classList.remove('show');return;}
   renderSyncHist();
   const r=$('#syncHistBtn').getBoundingClientRect();
   p.style.top=(r.bottom+8)+'px'; p.style.right=Math.max(8,innerWidth-r.right)+'px'; p.style.left='auto';
   p.classList.add('show');
 };
+$('#actionHistBtn').onclick=e=>{
+  e.stopPropagation(); $('#syncHistPanel').classList.remove('show');
+  const p=$('#actionHistPanel');
+  if(p.classList.contains('show')){p.classList.remove('show');return;}
+  renderActionHist();
+  const r=$('#actionHistBtn').getBoundingClientRect();
+  p.style.top=(r.bottom+8)+'px'; p.style.right=Math.max(8,innerWidth-r.right)+'px'; p.style.left='auto';
+  p.classList.add('show');
+};
 $('#syncHistClose').onclick=()=>$('#syncHistPanel').classList.remove('show');
+$('#actionHistClose').onclick=()=>$('#actionHistPanel').classList.remove('show');
 $('#syncHistClear').onclick=()=>{state.syncLog=[];save();renderSyncHist();updateSyncBadge();toast('Histórico limpo');};
+$('#actionHistClear').onclick=()=>{state.actionLog=[];save();renderActionHist();toast('Histórico geral limpo');};
 
 // ---------- FILTER COL ACTIONS ----------
 $('#fltColAll').onclick=()=>{state.filter.hidden=[];save();render();openFilterPop();};
