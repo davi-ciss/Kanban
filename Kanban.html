@@ -1057,7 +1057,7 @@ $('#exportBtn').onclick=()=>{ const b=new Blob([JSON.stringify(state,null,2)],{t
   const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='kanban-backup.json'; a.click(); };
 $('#importBtn').onclick=()=>$('#importFile').click();
 $('#importFile').onchange=e=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader();
-  r.onload=()=>{ try{ const s=JSON.parse(r.result); if(s.cols){ state=s; save(); render(); toast('✓ Backup importado'); $('#setClose').onclick(); } }catch(err){ toast('⚠ Arquivo inválido'); } }; r.readAsText(f); };
+  r.onload=()=>{ try{ const s=JSON.parse(r.result); if(s.cols){ state=s; if(!state.autoBackup) state.autoBackup={enabled:false,freq:'daily',hours:4,time:'08:00',lastRun:0}; save(); render(); updateSyncPill(); updateAbNext(); toast('✓ Backup importado'); $('#setOv').classList.remove('show'); } }catch(err){ toast('⚠ Arquivo inválido'); } }; r.readAsText(f); };
 
 // ---------- TOPBAR ----------
 $('#search').addEventListener('input',e=>{ query=e.target.value.toLowerCase().trim(); render(); $('#searchClear').classList.toggle('show',!!e.target.value); });
