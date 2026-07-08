@@ -139,11 +139,20 @@
   .add-wrap{display:flex; align-items:center; gap:4px; background:var(--bg);
     border:1px dashed var(--line); border-radius:9px; padding-right:6px; transition:.15s}
   .add-wrap:focus-within{border-style:solid; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
-  .add-card input[data-add]{
+  .add-card textarea[data-add]{
     flex:1; min-width:0; background:none; border:none; outline:none;
-    padding:9px 11px; font-size:13px; color:inherit;
+    padding:10px 11px; font-size:13px; color:inherit; resize:none;
+    height:38px; overflow:hidden; font-family:inherit; line-height:1.4; margin:0
   }
-  .add-card input[data-add]::placeholder{color:var(--txt-mut)}
+  .add-card textarea[data-add]::placeholder{color:var(--txt-mut); line-height:1.4}
+  .add-btn{
+    width:28px; height:28px; border-radius:7px; background:var(--accent); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:600;
+    cursor:pointer; transition:.15s; margin-right:2px; flex:none;
+    opacity:0; transform:scale(.8); pointer-events:none; padding-bottom:1px
+  }
+  .add-wrap:focus-within .add-btn{opacity:1; transform:scale(1); pointer-events:auto}
+  .add-btn:hover{filter:brightness(1.15)}
   .add-sync{flex:none; display:inline-flex; align-items:center; gap:6px; margin:0;
     font-size:11px; font-weight:600; color:var(--txt-mut); cursor:pointer; user-select:none;
     padding:3px 9px 3px 7px; border-radius:20px;
@@ -663,7 +672,8 @@ function render(){
       <div class="cards" data-drop="${col.id}"></div>
       <div class="add-card">
         <div class="add-wrap">
-          <input placeholder="+ Adicionar tarefa" data-add="${col.id}">
+          <textarea rows="1" placeholder="+ Adicionar tarefa" data-add="${col.id}"></textarea>
+          <button class="add-btn" data-addbtn="${col.id}" title="Adicionar">＋</button>
           <label class="add-sync ${state.endpoint?'':'off'}" title="${state.endpoint?'Criar já sincronizada com a planilha (Sheets)':'Configure o endpoint do Sheets em ⚙'}">
             <input type="checkbox" data-addsync="${col.id}" ${state.endpoint?'checked':'disabled'}> sheets
           </label>
@@ -775,7 +785,14 @@ function wireBoard(){
     });
   });
   document.querySelectorAll('[data-add]').forEach(inp=>{
-    inp.addEventListener('keydown',e=>{ if(e.key==='Enter'&&inp.value.trim()){ addCard(inp.dataset.add, inp.value.trim()); inp.value=''; } });
+    inp.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); if(inp.value.trim()){ addCard(inp.dataset.add, inp.value.trim()); inp.value=''; inp.style.height='38px'; } } });
+    inp.addEventListener('input', () => { inp.style.height='38px'; const sh=inp.scrollHeight; if(sh>38) inp.style.height=sh+'px'; });
+  });
+  document.querySelectorAll('[data-addbtn]').forEach(btn=>{
+    btn.onclick = () => {
+      const inp = document.querySelector(`textarea[data-add="${btn.dataset.addbtn}"]`);
+      if(inp && inp.value.trim()){ addCard(btn.dataset.addbtn, inp.value.trim()); inp.value=''; inp.style.height='38px'; }
+    };
   });
   document.querySelectorAll('.col-title').forEach(t=>{
     t.addEventListener('blur',()=>{ const col=state.cols.find(c=>c.id===t.dataset.col); if(col){ col.name=t.textContent.trim()||'Sem nome'; save(); } });
