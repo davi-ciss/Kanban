@@ -1068,7 +1068,7 @@ function delCard(){
 }
 $('#cardSave').onclick=()=>saveCard(false);
 $('#cardCancel').onclick=closeCard; $('#cardClose').onclick=closeCard; $('#cardDel').onclick=delCard;
-$('#cardOv').onclick=e=>{ if(e.target.id==='cardOv') closeCard(); };
+$('#cardOv').onmousedown=e=>{ if(e.target.id==='cardOv') closeCard(); };
 
 // ---------- CARD INTERNAL NOTES ----------
 let editingNoteId = null;
@@ -1103,7 +1103,7 @@ function closeCardNote() {
 }
 $('#noteClose').onclick = closeCardNote;
 $('#noteSave').onclick = saveCardNote;
-$('#cardNoteOv').onclick = e => { if(e.target.id==='cardNoteOv') closeCardNote(); };
+$('#cardNoteOv').onmousedown = e => { if(e.target.id==='cardNoteOv') closeCardNote(); };
 
 // Editor Formatting Events
 document.querySelectorAll('.ed-btn[data-cmd]').forEach(b => {
@@ -1244,12 +1244,13 @@ function askConfirm(opts){
     $('#confirmTitle').textContent = opts.title || 'Confirmar';
     $('#confirmMsg').innerHTML = opts.message || '';
     const yes=$('#confirmYes'); yes.textContent = opts.confirmText || 'Confirmar';
-    const ov=$('#confirmOv'); ov.classList.add('show');
-    function close(v){ ov.classList.remove('show'); yes.onclick=null; $('#confirmNo').onclick=null; ov.onclick=null; document.removeEventListener('keydown', onKey); res(v); }
+    const ov=$('#confirmOv');
+    ov.classList.add('show');
+    ov.onmousedown=e=>{ if(e.target.id==='confirmOv') close(false); };
+    function close(v){ ov.classList.remove('show'); yes.onclick=null; $('#confirmNo').onclick=null; ov.onmousedown=null; document.removeEventListener('keydown', onKey); res(v); }
     function onKey(e){ if(e.key==='Escape') close(false); }
     yes.onclick=()=>close(true);
     $('#confirmNo').onclick=()=>close(false);
-    ov.onclick=e=>{ if(e.target.id==='confirmOv') close(false); };
     document.addEventListener('keydown', onKey);
     yes.focus();
   });
@@ -1274,9 +1275,11 @@ $('#clearNotes').onclick=async()=>{
 };
 
 // ---------- SETTINGS ----------
+function closeSet(){ $('#setOv').classList.remove('show'); }
 $('#settingsBtn').onclick=()=>{ $('#fEndpoint').value=state.endpoint; $('#fTab').value=state.tab; $('#setMsg').textContent=''; populateAbFields(); $('#setOv').classList.add('show'); };
-$('#setClose').onclick=$('#setSave').onclick=()=>{ state.endpoint=$('#fEndpoint').value.trim(); state.tab=$('#fTab').value.trim(); readAbFields(); save(); updateSyncPill(); $('#setOv').classList.remove('show'); updateAbNext(); };
-$('#setOv').onclick=e=>{ if(e.target.id==='setOv') $('#setClose').onclick(); };
+$('#setClose').onclick=closeSet;
+$('#setOv').onmousedown=e=>{ if(e.target.id==='setOv') $('#setClose').onclick(); };
+$('#setSave').onclick=()=>{ state.endpoint=$('#fEndpoint').value.trim(); state.tab=$('#fTab').value.trim(); readAbFields(); save(); updateSyncPill(); closeSet(); updateAbNext(); };
 $('#testConn').onclick=testConn; $('#pullBtn').onclick=pullSheet;
 $('#syncColsBtn').onclick=async()=>{ const m=$('#setMsg'); m.textContent='Lendo status…';
   const list=await syncStatusCols(); render(); m.textContent = list.length?`✓ ${list.length} status viraram colunas (ordem da validação).`:'⚠ Nenhuma validação de status encontrada na coluna B.'; };
