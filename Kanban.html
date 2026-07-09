@@ -121,11 +121,11 @@
   /* MAIN LAYOUT */
   .card{
     flex:none;
-    background:var(--card); border-radius:var(--radius-sm); padding:11px 28px 11px 12px;
+    background:var(--card); border-radius:var(--radius-sm); padding:11px 12px;
     border:1px solid var(--line); cursor:grab; position:relative; overflow:hidden;
     transition:background .12s, transform .06s, box-shadow .12s; user-select:none;
   }
-  .card-note-btn{position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:6px; border:none; background:transparent; cursor:pointer; opacity:0; transition:.15s; display:flex; align-items:center; justify-content:center; color:var(--txt-mut); z-index:2}
+  .card-note-btn{float:right; margin:-2px -4px 4px 8px; width:24px; height:24px; border-radius:6px; border:none; background:transparent; cursor:pointer; opacity:0; transition:.15s; display:flex; align-items:center; justify-content:center; color:var(--txt-mut); z-index:2; position:relative}
   .card:hover .card-note-btn{opacity:1; background:var(--bg-2)}
   .card-note-btn:hover{background:var(--line)!important; color:var(--txt)}
   .card-note-btn.has-notes{color:var(--blue)}
