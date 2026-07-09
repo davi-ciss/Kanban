@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kanban-v3-cache';
+const CACHE_NAME = 'kanban-v4-cache';
 const urlsToCache = [
   './Kanban.html',
   './manifest.webmanifest',

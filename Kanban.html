@@ -136,7 +136,15 @@
   .chip.jira:hover{text-decoration:underline; filter:brightness(1.1)}
   .chip.atrib{color:var(--green); background:#3fb95014}
   .chip.equipe{color:#e08a3c; background:#e08a3c14; font-weight:700}
-  .chip.linked{color:var(--green); background:#3fb95018}
+  .chip.linked{color:var(--green)}
+  
+  /* EDITOR CSS */
+  .ed-btn{background:transparent; border:1px solid transparent; border-radius:4px; color:var(--txt); width:28px; height:28px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:14px; font-family:inherit; transition:.15s}
+  .ed-btn:hover{background:var(--col); border-color:var(--line)}
+  #noteText pre {background:#1e1e1e; color:#d4d4d4; padding:10px; border-radius:6px; font-family:monospace; font-size:13px; overflow-x:auto}
+  #noteText ul, #noteText ol {padding-left:24px; margin:8px 0}
+  
+  /* MAIN LAYOUT */
   .card .pr-flag{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase}
 
   .add-card{padding:8px 10px 12px}
@@ -505,16 +513,39 @@
   </div>
   <!-- CARD INTERNAL NOTES MODAL -->
   <div class="ov" id="cardNoteOv">
-    <div class="modal" style="max-width:500px">
-      <div class="modal-h">
+    <div class="modal" style="width:90vw; max-width:1000px; height:90vh; max-height:800px; display:flex; flex-direction:column">
+      <div class="modal-h" style="flex:none">
         <span class="ttl">Anotações Internas</span>
         <button class="tbtn" id="noteClose">✕</button>
       </div>
-      <div class="modal-b" style="display:flex; flex-direction:column; gap:10px; height:100%">
-        <p class="hint" style="margin:0 0 4px">Estas anotações são apenas para controle interno e não são enviadas para a planilha (Google Sheets).</p>
-        <textarea id="noteText" placeholder="Escreva suas anotações aqui..." style="flex:1; min-height:220px; font-family:inherit; resize:vertical" class="field input"></textarea>
+      <div class="modal-b" style="flex:1; display:flex; flex-direction:column; gap:0; padding:10px; overflow:hidden">
+        <p class="hint" style="margin:0 0 10px; flex:none">Estas anotações são apenas para controle interno e não são enviadas para a planilha (Google Sheets).</p>
+        
+        <div class="editor-toolbar" style="flex:none; display:flex; gap:6px; padding:8px; background:var(--bg); border:1px solid var(--line); border-radius:8px 8px 0 0; border-bottom:none; flex-wrap:wrap; align-items:center">
+          <select id="edFont" title="Fonte" style="padding:4px; border-radius:4px; border:1px solid var(--line); background:var(--bg-2); color:var(--txt)">
+            <option value="Inter, sans-serif">Padrão</option>
+            <option value="Arial, sans-serif">Arial</option>
+            <option value="'Courier New', Courier, monospace">Monospace</option>
+            <option value="'Times New Roman', Times, serif">Serif</option>
+          </select>
+          <select id="edSize" title="Tamanho" style="padding:4px; border-radius:4px; border:1px solid var(--line); background:var(--bg-2); color:var(--txt)">
+            <option value="2">Pequeno</option>
+            <option value="3" selected>Normal</option>
+            <option value="5">Grande</option>
+            <option value="6">Enorme</option>
+          </select>
+          <div class="divider" style="width:1px; height:20px; background:var(--line); margin:0 4px"></div>
+          <button class="ed-btn" data-cmd="bold" title="Negrito (Ctrl+B)"><b>B</b></button>
+          <button class="ed-btn" data-cmd="italic" title="Itálico (Ctrl+I)"><i>I</i></button>
+          <button class="ed-btn" data-cmd="underline" title="Sublinhado (Ctrl+U)"><u>U</u></button>
+          <div class="divider" style="width:1px; height:20px; background:var(--line); margin:0 4px"></div>
+          <input type="color" id="edColor" title="Cor do Texto" style="width:26px; height:26px; padding:0; border:1px solid var(--line); border-radius:4px; cursor:pointer" value="#000000">
+          <button class="ed-btn" data-cmd="insertUnorderedList" title="Lista">📋</button>
+          <button class="ed-btn" id="edCode" title="Bloco de Código (pre)">&lt;/&gt;</button>
+        </div>
+        <div id="noteText" class="field input" contenteditable="true" style="flex:1; overflow-y:auto; border-radius:0 0 8px 8px; font-family:inherit; margin:0; padding:12px; outline:none; background:var(--bg-2)"></div>
       </div>
-      <div class="modal-f">
+      <div class="modal-f" style="flex:none; border-top:1px solid var(--line); padding-top:15px">
         <div class="spacer" style="flex:1"></div>
         <button class="btn solid" id="noteSave">Salvar anotações</button>
       </div>
@@ -1040,7 +1071,7 @@ function openCardNote(id) {
   }
   if (!card) return;
   editingNoteId = id;
-  $('#noteText').value = card.localNotes || '';
+  $('#noteText').innerHTML = card.localNotes || '';
   $('#cardNoteOv').classList.add('show');
   $('#noteText').focus();
 }
@@ -1052,7 +1083,7 @@ function saveCardNote() {
     if (card) break;
   }
   if (card) {
-    card.localNotes = $('#noteText').value.trim();
+    card.localNotes = $('#noteText').innerHTML;
     save(); render();
   }
   closeCardNote();
@@ -1064,6 +1095,32 @@ function closeCardNote() {
 $('#noteClose').onclick = closeCardNote;
 $('#noteSave').onclick = saveCardNote;
 $('#cardNoteOv').onclick = e => { if(e.target.id==='cardNoteOv') closeCardNote(); };
+
+// Editor Formatting Events
+document.querySelectorAll('.ed-btn[data-cmd]').forEach(b => {
+  b.onclick = e => {
+    e.preventDefault();
+    document.execCommand(b.dataset.cmd, false, null);
+    $('#noteText').focus();
+  };
+});
+$('#edCode').onclick = e => {
+  e.preventDefault();
+  document.execCommand('formatBlock', false, 'PRE');
+  $('#noteText').focus();
+};
+$('#edColor').oninput = e => {
+  document.execCommand('foreColor', false, e.target.value);
+  $('#noteText').focus();
+};
+$('#edFont').onchange = e => {
+  document.execCommand('fontName', false, e.target.value);
+  $('#noteText').focus();
+};
+$('#edSize').onchange = e => {
+  document.execCommand('fontSize', false, e.target.value);
+  $('#noteText').focus();
+};
 document.querySelectorAll('#prPick button').forEach(b=> b.onclick=()=>{
   document.querySelectorAll('#prPick button').forEach(x=>{x.classList.remove('on');x.style.background='';});
   b.classList.add('on'); b.style.background = PRIO[b.dataset.p].c==='transparent'?'var(--txt-mut)':PRIO[b.dataset.p].c;
