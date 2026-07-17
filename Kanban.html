@@ -1763,7 +1763,11 @@ function drawFolder(){
 async function readText(handle){
   let last;
   for(let i=0;i<10;i++){   // acessar costuma forçar o Drive a baixar; espera até ~5s
-    try{ const f=await handle.getFile(); return {f, txt:await f.text()}; }
+    try{
+      const f = await handle.getFile();
+      if(f.size === 0) return {f, txt:''};   // 0 bytes = vazio de verdade, nada pra baixar → carrega na hora
+      return {f, txt: await f.text()};
+    }
     catch(e){ last=e; if(i===0) toast('⏳ Baixando do Drive…'); await new Promise(r=>setTimeout(r, 500)); }
   }
   throw last;
@@ -1791,7 +1795,7 @@ async function openFile(en){
     const main=$('#notesMain');
     main.innerHTML=`<div class="note-editor">
       <div class="note-fname">📄 ${esc(en.name)}</div>
-      <div class="note-meta">${esc(nPath.map(p=>p.name).join(' / '))} · ${fmtWhen(f.lastModified)}${txt===''?' · (arquivo vazio ou não baixado do Drive)':''}</div>
+      <div class="note-meta">${esc(nPath.map(p=>p.name).join(' / '))} · ${fmtWhen(f.lastModified)}${txt===''?' · (arquivo vazio)':''}</div>
       <textarea class="note-body" id="noteBody" placeholder="Conteúdo do arquivo…"></textarea>
     </div>`;
     $('#noteBody').value=txt; $('#noteBody').oninput=saveFileDebounced;
