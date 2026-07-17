@@ -1368,7 +1368,7 @@ document.addEventListener('click',e=>{
   if(!e.target.closest('#cardTooltip') && !e.target.closest('.card')) hideCardTooltipNow();
 });
 
-// ---------- TOOLTIP DO CARD (hover 1.5s → mostra Observação + Nota local) ----------
+// ---------- TOOLTIP DO CARD (hover 1s → mostra Observação + Nota local) ----------
 const stripHtml = html => { const d=document.createElement('div'); d.innerHTML=html||''; return (d.textContent||'').trim(); };
 let ctTimer=null, ctHideTimer=null, ctShownFor=null;
 const ctEl = $('#cardTooltip');
@@ -1404,7 +1404,7 @@ function armCardTooltip(card, anchor){
   } else {
     clearTimeout(ctHideTimer);   // reentrou no mesmo card (ou nada mostrado ainda) — cancela hide pendente
   }
-  ctTimer = setTimeout(()=> showCardTooltip(card, anchor), 1500);
+  ctTimer = setTimeout(()=> showCardTooltip(card, anchor), 1000);
 }
 function disarmCardTooltip(){
   clearTimeout(ctTimer);
