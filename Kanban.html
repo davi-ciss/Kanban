@@ -277,6 +277,28 @@
   .color-grid button.on{border-color:var(--txt)}
   .color-custom{margin-top:11px; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--txt-dim); cursor:pointer}
   .color-custom input{width:30px; height:24px; padding:0; border:1px solid var(--line); border-radius:6px; background:none; cursor:pointer}
+
+  /* ---------- CARD HOVER TOOLTIP (observação + nota local) ---------- */
+  .card-tooltip{
+    position:fixed; z-index:70; width:320px; max-width:calc(100vw - 24px);
+    background:var(--bg-2); border:1px solid var(--line); border-radius:12px;
+    box-shadow:0 18px 46px -16px rgba(0,0,0,.6);
+    padding:0; display:none; opacity:0; transform:translateY(4px);
+    transition:opacity .12s ease, transform .12s ease; pointer-events:none;
+  }
+  .card-tooltip.show{display:block}
+  .card-tooltip.in{opacity:1; transform:translateY(0); pointer-events:auto}
+  .ct-sec{padding:10px 13px}
+  .ct-sec + .ct-sec{border-top:1px solid var(--line)}
+  .ct-h{display:flex; align-items:center; gap:6px; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--txt-mut); margin-bottom:6px}
+  .ct-h .dot{width:6px; height:6px; border-radius:50%; flex:none}
+  .ct-h .dot.obs{background:var(--accent)}
+  .ct-h .dot.loc{background:var(--blue, #5b8cff)}
+  .ct-body{font-size:12.5px; line-height:1.55; color:var(--txt); max-height:180px; overflow-y:auto; white-space:pre-wrap; word-break:break-word}
+  .ct-body:empty::before, .ct-body.empty::before{content:'Vazio'; color:var(--txt-mut); font-style:italic}
+  .ct-body pre{background:#1e1e1e; color:#d4d4d4; padding:8px; border-radius:6px; font-family:monospace; font-size:12px; overflow-x:auto; white-space:pre-wrap}
+  .ct-body ul, .ct-body ol{padding-left:20px; margin:4px 0}
+
   /* ---------- VIEW SWITCH + NOTAS ---------- */
   .view-switch{display:flex; background:var(--col); border:1px solid var(--line); border-radius:9px; padding:2px; gap:2px}
   .view-switch button{padding:5px 13px; border-radius:7px; font-size:12.5px; font-weight:600; color:var(--txt-dim); transition:.12s}
@@ -660,6 +682,12 @@
     <label class="color-custom">Personalizada <input type="color" id="colorCustom"></label>
   </div>
 
+  <!-- TOOLTIP DO CARD (observação + nota local) -->
+  <div class="card-tooltip" id="cardTooltip">
+    <div class="ct-sec"><div class="ct-h"><span class="dot obs"></span>Observação (planilha)</div><div class="ct-body" id="ctObs"></div></div>
+    <div class="ct-sec"><div class="ct-h"><span class="dot loc"></span>Nota local (só Kanban)</div><div class="ct-body" id="ctLoc"></div></div>
+  </div>
+
   <!-- CONFIRMAÇÃO -->
   <div class="ov" id="confirmOv">
     <div class="modal confirm-modal">
@@ -833,6 +861,8 @@ function cardEl(card, colId){
   el.querySelectorAll('a.chip').forEach(a=> a.addEventListener('click', e=> e.stopPropagation()));
   const nb = el.querySelector('.card-note-btn');
   if(nb) nb.onclick = e => { e.stopPropagation(); openCardNote(card.id); };
+  el.addEventListener('mouseenter', () => armCardTooltip(card, el));
+  el.addEventListener('mouseleave', () => disarmCardTooltip());
   return el;
 }
 const esc = s => (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -949,6 +979,7 @@ function delColumn(id){
 let editing=null;
 function openCard(id, colId){
   const col = state.cols.find(c=>c.id===colId); const card = col.cards.find(c=>c.id===id); if(!card) return;
+  hideCardTooltipNow();
   editing = {card, colId};
   $('#fTitle').value=card.title; $('#fDesc').value=card.desc||''; $('#fTicket').value=card.ticket||''; $('#fCli').value=card.cli||'';
   $('#fJira').value=card.jira||''; $('#fAtrib').value=card.atrib||'';
@@ -1079,6 +1110,7 @@ function openCardNote(id) {
     if (card) break;
   }
   if (!card) return;
+  hideCardTooltipNow();
   editingNoteId = id;
   $('#noteText').innerHTML = card.localNotes || '';
   $('#cardNoteOv').classList.add('show');
@@ -1299,7 +1331,7 @@ $('#search').addEventListener('input',e=>{ query=e.target.value.toLowerCase().tr
 $('#searchClear').onclick=()=>{ $('#search').value=''; query=''; render(); $('#searchClear').classList.remove('show'); $('#search').focus(); };
 $('#addColBtn').onclick=addColumn;
 $('#themeBtn').onclick=()=>{ state.theme = state.theme==='dark'?'light':'dark'; save(); render(); };
-document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeCard(); $('#setOv').classList.remove('show'); $('#filterPop').classList.remove('show'); $('#colorPop').classList.remove('show'); $('#syncHistPanel').classList.remove('show'); }
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeCard(); hideCardTooltipNow(); $('#setOv').classList.remove('show'); $('#filterPop').classList.remove('show'); $('#colorPop').classList.remove('show'); $('#syncHistPanel').classList.remove('show'); }
   if((e.ctrlKey||e.metaKey)&&e.key==='f'){ e.preventDefault(); $('#search').focus(); } });
 
 // ---------- FILTROS / COR DOS STATUS ----------
@@ -1333,7 +1365,50 @@ document.addEventListener('click',e=>{
   if(!e.target.closest('#filterPop') && !e.target.closest('#filterBtn')) $('#filterPop').classList.remove('show');
   if(!e.target.closest('#colorPop') && !e.target.classList.contains('col-dot')) $('#colorPop').classList.remove('show');
   if(!e.target.closest('#histPanel') && !e.target.closest('#histBtn')) $('#histPanel').classList.remove('show');
+  if(!e.target.closest('#cardTooltip') && !e.target.closest('.card')) hideCardTooltipNow();
 });
+
+// ---------- TOOLTIP DO CARD (hover 1.5s → mostra Observação + Nota local) ----------
+const stripHtml = html => { const d=document.createElement('div'); d.innerHTML=html||''; return (d.textContent||'').trim(); };
+let ctTimer=null, ctHideTimer=null;
+const ctEl = $('#cardTooltip');
+function positionTooltip(anchor){
+  const r = anchor.getBoundingClientRect();
+  ctEl.style.display='block';                      // precisa estar visível pra medir offsetWidth/Height
+  const tw = ctEl.offsetWidth || 320, th = ctEl.offsetHeight || 80;
+  let left = r.right + 10;
+  if(left + tw > innerWidth - 8) left = Math.max(8, r.left - tw - 10);   // sem espaço à direita → mostra à esquerda
+  let top = r.top;
+  if(top + th > innerHeight - 8) top = Math.max(8, innerHeight - th - 8);
+  ctEl.style.left = left+'px'; ctEl.style.top = top+'px';
+}
+function showCardTooltip(card, anchor){
+  const obsTxt = (card.desc||'').trim();
+  const locTxt = stripHtml(card.localNotes);
+  if(!obsTxt && !locTxt) return;                    // nada pra mostrar → não incomoda
+  $('#ctObs').textContent = obsTxt; $('#ctObs').classList.toggle('empty', !obsTxt);
+  $('#ctLoc').innerHTML = card.localNotes && locTxt ? card.localNotes : '';
+  $('#ctLoc').classList.toggle('empty', !locTxt);
+  positionTooltip(anchor);
+  requestAnimationFrame(()=> ctEl.classList.add('show','in'));
+}
+function hideCardTooltipNow(){
+  ctEl.classList.remove('in','show'); ctEl.style.display='';
+}
+function armCardTooltip(card, anchor){
+  clearTimeout(ctHideTimer);
+  clearTimeout(ctTimer);
+  ctTimer = setTimeout(()=> showCardTooltip(card, anchor), 1500);
+}
+function disarmCardTooltip(){
+  clearTimeout(ctTimer);
+  ctHideTimer = setTimeout(hideCardTooltipNow, 120);   // pequeno atraso: dá tempo do mouse entrar na tooltip
+}
+ctEl.addEventListener('mouseenter', ()=> clearTimeout(ctHideTimer));
+ctEl.addEventListener('mouseleave', disarmCardTooltip);
+board.addEventListener('scroll', hideCardTooltipNow);
+window.addEventListener('resize', hideCardTooltipNow);
+document.addEventListener('dragstart', hideCardTooltipNow, true);
 
 let toastT;
 function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600); }
@@ -1535,6 +1610,7 @@ function noteFind(id){ for(const f of state.notes.folders){ const n=f.notes.find
 function fmtWhen(ts){ if(!ts) return '—'; const d=new Date(ts); return d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
 
 function switchView(v){
+  hideCardTooltipNow();
   state.view=v; document.body.dataset.view=v; save();
   document.querySelectorAll('#viewSwitch button').forEach(b=> b.classList.toggle('on', b.dataset.v===v));
   if(v==='notes') renderNotes();
