@@ -1370,7 +1370,7 @@ document.addEventListener('click',e=>{
 
 // ---------- TOOLTIP DO CARD (hover 1.5s → mostra Observação + Nota local) ----------
 const stripHtml = html => { const d=document.createElement('div'); d.innerHTML=html||''; return (d.textContent||'').trim(); };
-let ctTimer=null, ctHideTimer=null;
+let ctTimer=null, ctHideTimer=null, ctShownFor=null;
 const ctEl = $('#cardTooltip');
 function positionTooltip(anchor){
   const r = anchor.getBoundingClientRect();
@@ -1391,13 +1391,19 @@ function showCardTooltip(card, anchor){
   $('#ctLoc').classList.toggle('empty', !locTxt);
   positionTooltip(anchor);
   requestAnimationFrame(()=> ctEl.classList.add('show','in'));
+  ctShownFor = card.id;
 }
 function hideCardTooltipNow(){
-  ctEl.classList.remove('in','show'); ctEl.style.display='';
+  ctEl.classList.remove('in','show'); ctEl.style.display=''; ctShownFor=null;
 }
 function armCardTooltip(card, anchor){
-  clearTimeout(ctHideTimer);
   clearTimeout(ctTimer);
+  if(ctShownFor && ctShownFor!==card.id){
+    // tooltip mostrando outro card: fecha na hora (o mouse foi pra uma tarefa diferente, não em direção à tooltip)
+    clearTimeout(ctHideTimer); hideCardTooltipNow();
+  } else {
+    clearTimeout(ctHideTimer);   // reentrou no mesmo card (ou nada mostrado ainda) — cancela hide pendente
+  }
   ctTimer = setTimeout(()=> showCardTooltip(card, anchor), 1500);
 }
 function disarmCardTooltip(){
