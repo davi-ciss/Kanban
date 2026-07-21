@@ -57,6 +57,8 @@
   .brand{display:flex; align-items:center; gap:9px; font-weight:700; letter-spacing:.2px}
   .brand .dot{width:11px;height:11px;border-radius:3px;background:var(--accent);box-shadow:0 0 12px var(--accent)}
   .brand small{font-weight:500;color:var(--txt-mut)}
+  .app-version{position:absolute; top:100%; left:18px; margin-top:3px; font-size:9.5px; font-weight:600;
+    color:var(--txt-mut); letter-spacing:.3px; opacity:.55; pointer-events:none; user-select:none}
   .search{
     flex:1; max-width:420px; display:flex; align-items:center; gap:8px;
     background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:7px 11px;
@@ -461,6 +463,7 @@
 <body>
   <div class="topbar">
     <div class="brand"><span class="dot"></span>Kanban <small id="brandName"></small></div>
+    <span class="app-version" id="appVersion" title="Versão do app — v(base).(nº de commits no GitHub)"></span>
     <span class="total-count" id="totalCount" title="Total de tarefas (ignora filtros e busca)"></span>
     <div class="view-switch" id="viewSwitch">
       <button data-v="board" class="on">Quadro</button>
@@ -773,6 +776,9 @@
 "use strict";
 const $ = s => document.querySelector(s);
 const uid = () => 'c'+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
+// Versão: v<base>.<nº de commits em main no GitHub>. Bump manual do nº a cada commit novo
+// (git log --oneline | wc -l). Sem build step aqui, então não dá pra calcular sozinho em runtime.
+const APP_VERSION = 'v1.0.28';
 const KEY = 'kanban_ciss_v1';
 const COLORS = ['#5b8cff','#3fb950','#d6a533','#a371f7','#39c5cf','#e5534b','#ec6cb9'];
 const NO_STATUS = 'Sem status';   // coluna sintética = status vazio na planilha
@@ -2028,6 +2034,7 @@ $('#noteSearchClear').onclick=()=>{ $('#noteSearch').value=''; noteQuery=''; app
     state.notesSideW=parseInt(side.style.width)||272; save(); });
 })();
 
+$('#appVersion').textContent = APP_VERSION;
 render();
 updateSyncBadge();
 checkAutoBackup();
