@@ -146,6 +146,7 @@
   .chip.atrib{color:var(--green); background:#3fb95014}
   .chip.equipe{color:#e08a3c; background:#e08a3c14; font-weight:700}
   .chip.linked{color:var(--green)}
+  .chip.sync-err{color:var(--red); background:#e5534b1a; cursor:help}
   
   /* EDITOR CSS */
   .ed-btn{background:transparent; border:1px solid transparent; border-radius:4px; color:var(--txt); width:28px; height:28px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:14px; font-family:inherit; transition:.15s}
@@ -919,7 +920,11 @@ function cardEl(card, colId){
   if(card.atrib==='Sim') chips.push(`<span class="chip atrib">Atribuído</span>`);
   if(card.equipe) chips.push(`<span class="chip equipe">🏭 ${esc(card.equipe)}</span>`);
   if(pr.l)        chips.push(`<span class="chip pr-flag" style="color:${pr.c}">${pr.l}</span>`);
-  if(card.linked) chips.push(`<span class="chip linked">⟳ Sincronizado</span>`);
+  if(card.linked){
+    chips.push(card.syncError
+      ? `<span class="chip sync-err" title="${esc(card.syncError)} — reprocessando automaticamente…">⚠ Erro de sync</span>`
+      : `<span class="chip linked">⟳ Sincronizado</span>`);
+  }
   
   const hasNotes = !!(card.localNotes && card.localNotes.trim());
   el.innerHTML = `
@@ -1022,7 +1027,7 @@ function addCard(colId, title){
   col.cards.unshift(card);
   save(); render();
   logAction('create', card.id, card.title, `Criada na coluna ${col.name}`);
-  if(sync) pushCard(card, col.name);
+  if(sync) pushCardAuto(card, col.name);
 }
 function moveCard(id, fromCol, toCol, order){
   const from = state.cols.find(c=>c.id===fromCol); const to = state.cols.find(c=>c.id===toCol);
@@ -1172,7 +1177,7 @@ function saveCard(pushAfter){
   logAction('edit', editing.card.id, editing.card.title, 'Tarefa editada/atualizada');
   if(editing.card.linked && state.endpoint){     // salvar/atualizar sempre sincroniza
     const col = state.cols.find(c=>c.id===editing.colId);
-    pushCard(editing.card, col?col.name:'');
+    pushCardAuto(editing.card, col?col.name:'');
   }
   if(!pushAfter) closeCard(); else renderLinkBox(editing.card);
 }
@@ -1293,19 +1298,62 @@ function statusValido(name){
   const list = state.statuses||[];
   return !list.length || list.some(s=>s.toLowerCase()===String(name||'').toLowerCase());
 }
-async function pushCard(card, status){
+async function pushCard(card, status, silent){
   const out = (status===NO_STATUS) ? '' : (status||'');   // "Sem status" → grava célula vazia
-  if(out && !statusValido(out)) toast(`⚠ "${out}" não existe na validação da planilha — ficará inválido`);
+  if(out && !statusValido(out) && !silent) toast(`⚠ "${out}" não existe na validação da planilha — ficará inválido`);
   try{
     const r=await jsonp({action:'upsert', key:card.rowKey||card.ticket||'',
       ticket:card.ticket||'', assunto:card.title||'', cliente:card.cli||'',
       status:out, obs:card.desc||'', jira:card.jira||'', atrib:card.atrib||'', equipe:card.equipe||''});
-    if(r&&r.ok){ card.linked=true; card.rowKey=r.key||card.rowKey||card.ticket||''; save();
+    if(r&&r.ok){ card.linked=true; card.rowKey=r.key||card.rowKey||card.ticket||''; card.syncError=null; save();
       toast('✓ Enviado ao Sheets'); logSync({cardId:card.id,title:card.title,ticket:card.ticket,action:'upsert',ok:true}); render(); return true;
-    } else { const em=(r&&r.error)||'Erro ao enviar'; toast('⚠ '+em); logSync({cardId:card.id,title:card.title,ticket:card.ticket,action:'upsert',ok:false,error:em,status:out}); return false; }
-  }catch(e){ toast('⚠ '+e); logSync({cardId:card.id,title:card.title,ticket:card.ticket,action:'upsert',ok:false,error:String(e),status:out}); return false; }
+    } else {
+      const em=(r&&r.error)||'Erro ao enviar'; card.syncError=em; save();
+      if(!silent) toast('⚠ '+em);
+      logSync({cardId:card.id,title:card.title,ticket:card.ticket,action:'upsert',ok:false,error:em,status:out}); render(); return false;
+    }
+  }catch(e){
+    const em=String(e); card.syncError=em; save();
+    if(!silent) toast('⚠ '+em);
+    logSync({cardId:card.id,title:card.title,ticket:card.ticket,action:'upsert',ok:false,error:em,status:out}); render(); return false;
+  }
 }
-function pushStatus(card, status){ if(state.endpoint) pushCard(card, status); }
+
+// ---------- RETRY AUTOMÁTICO DE SINCRONIZAÇÃO ----------
+// Se um push falha, o próprio sistema reprocessa sozinho: 3 tentativas rápidas
+// com backoff (10s/30s/90s) e, se ainda assim não resolver, uma varredura
+// periódica (a cada 3min) continua tentando enquanto o card tiver syncError.
+const SYNC_RETRY_DELAYS = [10000, 30000, 90000];
+let autoRetryTimers = {};
+function findColOfCard(id){ for(const c of state.cols){ if(c.cards.some(x=>x.id===id)) return c; } return null; }
+function armAutoRetry(card, attempt){
+  if(attempt >= SYNC_RETRY_DELAYS.length) return;   // backoff rápido esgotado — a varredura periódica assume dali pra frente
+  clearTimeout(autoRetryTimers[card.id]);
+  autoRetryTimers[card.id] = setTimeout(async () => {
+    delete autoRetryTimers[card.id];
+    if(!state.endpoint) return;
+    const c = findCardById(card.id); if(!c || !c.syncError) return;   // card excluído ou já resolvido nesse meio-tempo
+    const col = findColOfCard(c.id); if(!col) return;
+    const ok = await pushCard(c, col.name, true);   // busca a coluna ATUAL, não a de quando falhou
+    if(!ok) armAutoRetry(c, attempt+1);
+  }, SYNC_RETRY_DELAYS[attempt]);
+}
+function pushCardAuto(card, status){
+  return pushCard(card, status).then(ok => { if(!ok) armAutoRetry(card, 0); return ok; });
+}
+function checkSyncRetries(){
+  if(!state.endpoint) return;
+  state.cols.forEach(col => {
+    col.cards.forEach(card => {
+      if(card.linked && card.syncError && !autoRetryTimers[card.id]){
+        pushCard(card, col.name, true).then(ok => { if(!ok) armAutoRetry(card, 0); });
+      }
+    });
+  });
+}
+setInterval(checkSyncRetries, 180000);
+
+function pushStatus(card, status){ if(state.endpoint) pushCardAuto(card, status); }
 
 const digitsOnly = v => String(v==null?'':v).replace(/\D/g,'');
 function colForStatus(name){
@@ -1618,7 +1666,7 @@ function renderSyncHist(){
     if(!found){ toast('Card não encontrado (pode ter sido excluído)'); return; }
     b.textContent='…'; b.disabled=true;
     const st=entry.status||found.col.name;
-    const ok=await pushCard(found.card, st);
+    const ok=await pushCardAuto(found.card, st);
     if(ok) entry.resolved=true;
     save(); renderSyncHist(); updateSyncBadge();
   });
@@ -1983,6 +2031,7 @@ $('#noteSearchClear').onclick=()=>{ $('#noteSearch').value=''; noteQuery=''; app
 render();
 updateSyncBadge();
 checkAutoBackup();
+setTimeout(checkSyncRetries, 5000);   // reprocessa cards com erro de sync herdado de uma sessão anterior, logo na abertura
 switchView(state.view||'board');
 </script>
 <script>
