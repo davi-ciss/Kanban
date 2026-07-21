@@ -278,6 +278,21 @@
   .color-custom{margin-top:11px; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--txt-dim); cursor:pointer}
   .color-custom input{width:30px; height:24px; padding:0; border:1px solid var(--line); border-radius:6px; background:none; cursor:pointer}
 
+  /* ---------- LINK DO CLIENTE ---------- */
+  .cli-link-btn{margin-left:auto; color:var(--txt-mut); padding:2px 5px; border-radius:6px; font-size:12px; line-height:1; transition:.12s}
+  .cli-link-btn:hover{background:var(--col); color:var(--txt)}
+  .cli-link-btn.on{color:var(--accent)}
+  .link-pop{position:fixed; z-index:65; width:280px; max-width:calc(100vw - 24px); background:var(--bg-2); border:1px solid var(--line);
+    border-radius:12px; box-shadow:0 14px 40px -14px rgba(0,0,0,.6); padding:12px; display:none; animation:pop .12s ease}
+  .link-pop.show{display:block}
+  .link-pop label{display:block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--txt-mut); margin-bottom:7px}
+  .link-pop input{width:100%; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:13px; color:var(--txt); outline:none}
+  .link-pop input:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+  .link-pop .hint{margin:8px 0 0}
+  .link-pop-foot{display:flex; align-items:center; gap:8px; margin-top:11px}
+  .chip.cli[href]{cursor:pointer; text-decoration:none}
+  .chip.cli[href]:hover{text-decoration:underline; filter:brightness(1.15)}
+
   /* ---------- CARD HOVER TOOLTIP (observação + nota local) ---------- */
   .card-tooltip{
     position:fixed; z-index:70; width:320px; max-width:calc(100vw - 24px);
@@ -510,7 +525,7 @@
         <div class="field"><label>Detalhes / observação</label><textarea id="fDesc" rows="3" placeholder="Contexto, links, passos…"></textarea></div>
         <div class="row2">
           <div class="field"><label>Ticket</label><input id="fTicket" placeholder="Ex: 123456"></div>
-          <div class="field"><label>Cliente</label><input id="fCli" placeholder="Nome do cliente"></div>
+          <div class="field"><label style="display:flex;align-items:center">Cliente<button type="button" class="cli-link-btn" id="cliLinkBtn" title="Link do cliente (ex.: DataCISS)">🔗</button></label><input id="fCli" placeholder="Nome do cliente"></div>
         </div>
         <div class="row2">
           <div class="field"><label>Jira</label><input id="fJira" placeholder="Ex: CISS-174019"></div>
@@ -577,8 +592,9 @@
         <div id="noteText" class="field input" contenteditable="true" style="flex:1; overflow-y:auto; border-radius:0 0 8px 8px; font-family:inherit; margin:0; padding:12px; outline:none; background:var(--bg-2)"></div>
       </div>
       <div class="modal-f" style="flex:none; border-top:1px solid var(--line); padding-top:15px">
+        <span class="hint" id="noteSaveStatus"></span>
         <div class="spacer" style="flex:1"></div>
-        <button class="btn solid" id="noteSave">Salvar anotações</button>
+        <button class="btn solid" id="noteSave">Fechar</button>
       </div>
     </div>
   </div>
@@ -613,6 +629,19 @@
           <input type="file" id="importFile" accept="application/json" hidden>
         </div>
         <p class="hint">O board vive no navegador desta máquina (localStorage). Faça backup com <b>Exportar</b> de vez em quando — ou pra migrar de navegador/máquina: <b>Exportar</b> aqui e <b>Importar</b> no outro.</p>
+        <hr style="border:none;border-top:1px solid var(--line);margin:4px 0">
+        <div class="field">
+          <label>Ordenação dos cards</label>
+          <select id="fSortBy">
+            <option value="manual">Manual (arrastar)</option>
+            <option value="title">Alfabética (título)</option>
+            <option value="client">Alfabética por cliente</option>
+            <option value="ticket">Número do ticket</option>
+            <option value="prio">Prioridade</option>
+            <option value="date">Data de adição</option>
+          </select>
+          <p class="hint" style="margin:8px 0 0">Define a ordem dos cards dentro de cada coluna. É uma configuração fixa — fica aplicada até você trocar aqui, não é um filtro que se limpa sozinho. Escolha <b>Manual</b> pra voltar a arrastar livremente.</p>
+        </div>
         <hr style="border:none;border-top:1px solid var(--line);margin:4px 0">
         <div class="field"><label>Backup automático</label>
           <div class="sync-toggle" style="margin-bottom:4px">
@@ -682,6 +711,18 @@
     <label class="color-custom">Personalizada <input type="color" id="colorCustom"></label>
   </div>
 
+  <!-- LINK DO CLIENTE -->
+  <div class="link-pop" id="cliLinkPop">
+    <label>Link do cliente</label>
+    <input id="cliLinkInput" type="url" placeholder="https://…" autocomplete="off">
+    <p class="hint">Se preenchido, o nome do cliente vira clicável no card e abre esse link em nova guia.</p>
+    <div class="link-pop-foot">
+      <button class="btn ghost" id="cliLinkClear" style="color:var(--red)">Remover</button>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn solid" id="cliLinkOk">OK</button>
+    </div>
+  </div>
+
   <!-- TOOLTIP DO CARD (observação + nota local) -->
   <div class="card-tooltip" id="cardTooltip">
     <div class="ct-sec"><div class="ct-h"><span class="dot obs"></span>Observação (planilha)</div><div class="ct-body" id="ctObs"></div></div>
@@ -743,7 +784,8 @@ function load(){
   return {
     cols:[],   // começa sem colunas; cria ao importar ou no "+ Coluna"
     endpoint:'', tab:'', theme:'dark', filter:{prio:[],sync:'all',hidden:[]},
-    view:'board', notesMode:'app', notes:{folders:[{id:'nf1', name:'Geral', notes:[]}], active:null}
+    view:'board', notesMode:'app', notes:{folders:[{id:'nf1', name:'Geral', notes:[]}], active:null},
+    sortBy:'manual'
   };
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
@@ -754,6 +796,7 @@ if(!state.notesMode) state.notesMode='app';
 if(!state.syncLog) state.syncLog=[];
 if(!state.actionLog) state.actionLog=[];
 if(!state.autoBackup) state.autoBackup={enabled:false,freq:'daily',hours:4,time:'08:00',lastRun:0};
+if(!state.sortBy) state.sortBy='manual';
 let query='';
 
 // ---------- RENDER ----------
@@ -764,7 +807,7 @@ function render(){
   const hidden = (state.filter&&state.filter.hidden)||[];
   state.cols.forEach(col=>{
     if(hidden.includes(col.id)) return;            // coluna oculta pelo filtro
-    const visible = col.cards.filter(c=>matchQ(c)&&matchFilter(c));
+    const visible = sortCardsList(col.cards.filter(c=>matchQ(c)&&matchFilter(c)));
     if(query && !visible.length) return;           // pesquisando: só mostra colunas com resultado
     const el = document.createElement('div');
     el.className='col'; el.dataset.col=col.id;
@@ -818,6 +861,31 @@ const matchFilter = c => {
   if(f.sync==='no'  &&  c.linked) return false;
   return true;
 };
+
+// ---------- ORDENAÇÃO (configuração persistente, não é filtro) ----------
+const SORT_LABELS = {
+  manual: 'Manual (arrastar)',
+  title:  'Alfabética (título)',
+  client: 'Alfabética por cliente',
+  ticket: 'Número do ticket',
+  prio:   'Prioridade',
+  date:   'Data de adição'
+};
+const PRIO_RANK = {urgent:0, high:1, med:2, low:3, none:4};
+function sortCardsList(list){
+  const by = state.sortBy || 'manual';
+  if(by === 'manual') return list;                 // preserva a ordem de arrastar (não muta col.cards)
+  const arr = list.slice();
+  const collator = new Intl.Collator('pt-BR', {sensitivity:'base'});
+  switch(by){
+    case 'title':  arr.sort((a,b)=> collator.compare(a.title||'', b.title||'')); break;
+    case 'client': arr.sort((a,b)=> collator.compare(a.cli||'', b.cli||'')); break;
+    case 'ticket': arr.sort((a,b)=> (parseInt(String(a.ticket||'').replace(/\D/g,''),10)||Infinity) - (parseInt(String(b.ticket||'').replace(/\D/g,''),10)||Infinity)); break;
+    case 'prio':   arr.sort((a,b)=> (PRIO_RANK[a.prio||'none']??4) - (PRIO_RANK[b.prio||'none']??4)); break;
+    case 'date':   arr.sort((a,b)=> (a.createdAt||0) - (b.createdAt||0)); break;
+  }
+  return arr;
+}
 function updateFilterBadge(){
   const f = state.filter||{};
   const n = (f.prio?f.prio.length:0) + ((f.sync&&f.sync!=='all')?1:0) + (f.hidden?f.hidden.length:0);
@@ -843,7 +911,11 @@ function cardEl(card, colId){
   if(card.ticket){ const n=String(card.ticket).replace(/\D/g,'');
     chips.push(`<a class="chip ticket" draggable="false" target="_blank" rel="noopener" href="https://cisssa.zendesk.com/agent/tickets/${n}">#${esc(card.ticket)}</a>`); }
   if(card.jira){ chips.push(`<a class="chip jira" draggable="false" target="_blank" rel="noopener" href="https://cisspoder.atlassian.net/browse/${encodeURIComponent(card.jira)}">${esc(card.jira)}</a>`); }
-  if(card.cli)    chips.push(`<span class="chip cli">${esc(card.cli)}</span>`);
+  if(card.cli){
+    chips.push(card.cliLink
+      ? `<a class="chip cli" draggable="false" target="_blank" rel="noopener" href="${esc(card.cliLink)}" title="${esc(card.cliLink)}">${esc(card.cli)}</a>`
+      : `<span class="chip cli">${esc(card.cli)}</span>`);
+  }
   if(card.atrib==='Sim') chips.push(`<span class="chip atrib">Atribuído</span>`);
   if(card.equipe) chips.push(`<span class="chip equipe">🏭 ${esc(card.equipe)}</span>`);
   if(pr.l)        chips.push(`<span class="chip pr-flag" style="color:${pr.c}">${pr.l}</span>`);
@@ -976,13 +1048,14 @@ function delColumn(id){
 }
 
 // ---------- CARD MODAL ----------
-let editing=null;
+let editing=null, pendingCliLink='';
 function openCard(id, colId){
   const col = state.cols.find(c=>c.id===colId); const card = col.cards.find(c=>c.id===id); if(!card) return;
   hideCardTooltipNow();
   editing = {card, colId};
   $('#fTitle').value=card.title; $('#fDesc').value=card.desc||''; $('#fTicket').value=card.ticket||''; $('#fCli').value=card.cli||'';
   $('#fJira').value=card.jira||''; $('#fAtrib').value=card.atrib||'';
+  pendingCliLink = card.cliLink || ''; updateCliLinkBtn();
   let eqs = [...new Set(state.cols.flatMap(c=>c.cards).map(c=>c.equipe).filter(Boolean))].sort();
   if(!eqs.length) eqs = ['N3 Fábrica','Comitê Contábil', 'Performance e Segurança'];
   $('#equipeList').innerHTML = eqs.map(x=>`<option value="${esc(x)}"></option>`).join('');
@@ -1048,11 +1121,39 @@ function renderLinkBox(card){
   };
   const pn = $('#pushNow'); if(pn) pn.onclick = ()=> saveCard(true);
 }
+
+// ---------- LINK DO CLIENTE ----------
+const normalizeUrl = u => { u=(u||'').trim(); if(!u) return ''; return /^[a-z][a-z0-9+.-]*:\/\//i.test(u) ? u : 'https://'+u; };
+function updateCliLinkBtn(){
+  const btn = $('#cliLinkBtn'); if(!btn) return;
+  const on = !!pendingCliLink;
+  btn.classList.toggle('on', on);
+  btn.title = on ? ('Link do cliente: '+pendingCliLink) : 'Link do cliente (ex.: DataCISS)';
+}
+function openCliLinkPop(){
+  const pop = $('#cliLinkPop'), btn = $('#cliLinkBtn');
+  $('#cliLinkInput').value = pendingCliLink;
+  const r = btn.getBoundingClientRect();
+  pop.style.display='block';
+  const pw = pop.offsetWidth || 280;
+  pop.style.top = (r.bottom+8)+'px';
+  pop.style.left = Math.max(8, Math.min(r.left, innerWidth-pw-8))+'px';
+  pop.classList.add('show');
+  $('#cliLinkInput').focus();
+}
+function closeCliLinkPop(){ $('#cliLinkPop').classList.remove('show'); $('#cliLinkPop').style.display=''; }
+$('#cliLinkBtn').onclick = e => { e.preventDefault(); e.stopPropagation();
+  $('#cliLinkPop').classList.contains('show') ? closeCliLinkPop() : openCliLinkPop(); };
+$('#cliLinkOk').onclick = () => { pendingCliLink = normalizeUrl($('#cliLinkInput').value); updateCliLinkBtn(); closeCliLinkPop(); };
+$('#cliLinkClear').onclick = () => { pendingCliLink=''; $('#cliLinkInput').value=''; updateCliLinkBtn(); closeCliLinkPop(); };
+$('#cliLinkInput').addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); $('#cliLinkOk').click(); } });
+
 function readForm(){
   const c = editing.card;
   c.title=$('#fTitle').value.trim()||'(sem título)'; c.desc=$('#fDesc').value.trim();
   const tkRaw=$('#fTicket').value.trim(); c.ticket = tkRaw.replace(/\D/g,'') || '';   // nº ou link → só o nº
   c.cli=$('#fCli').value.trim();
+  c.cliLink = pendingCliLink;
   const jrRaw=$('#fJira').value.trim(); const mj=jrRaw.match(/[A-Za-z]+-\d+/); c.jira = mj ? mj[0].toUpperCase() : jrRaw;  // nº ou link → só a chave
   c.atrib=$('#fAtrib').value; c.equipe=$('#fEquipe').value.trim();
   const on=document.querySelector('#prPick button.on'); c.prio = on?on.dataset.p:'none';
@@ -1101,40 +1202,42 @@ $('#cardSave').onclick=()=>saveCard(false);
 $('#cardCancel').onclick=closeCard; $('#cardClose').onclick=closeCard; $('#cardDel').onclick=delCard;
 $('#cardOv').onmousedown=e=>{ if(e.target.id==='cardOv') closeCard(); };
 
-// ---------- CARD INTERNAL NOTES ----------
-let editingNoteId = null;
+// ---------- CARD INTERNAL NOTES (salvamento automático, sem botão "Salvar") ----------
+let editingNoteId = null, noteSaveTimer = null;
+function findCardById(id){
+  for (const c of state.cols) { const card = c.cards.find(x => x.id === id); if (card) return card; }
+  return null;
+}
 function openCardNote(id) {
-  let card;
-  for (const c of state.cols) {
-    card = c.cards.find(x => x.id === id);
-    if (card) break;
-  }
+  const card = findCardById(id);
   if (!card) return;
   hideCardTooltipNow();
   editingNoteId = id;
   $('#noteText').innerHTML = card.localNotes || '';
+  $('#noteSaveStatus').textContent = '';
   $('#cardNoteOv').classList.add('show');
   $('#noteText').focus();
 }
-function saveCardNote() {
+function flushCardNote(){
+  clearTimeout(noteSaveTimer);
   if (!editingNoteId) return;
-  let card;
-  for (const c of state.cols) {
-    card = c.cards.find(x => x.id === editingNoteId);
-    if (card) break;
-  }
-  if (card) {
-    card.localNotes = $('#noteText').innerHTML;
-    save(); render();
-  }
-  closeCardNote();
+  const card = findCardById(editingNoteId);
+  if (card) { card.localNotes = $('#noteText').innerHTML; save(); }
+}
+function scheduleNoteAutoSave(){
+  clearTimeout(noteSaveTimer);
+  const st = $('#noteSaveStatus'); if (st) st.textContent = 'Salvando…';
+  noteSaveTimer = setTimeout(() => { flushCardNote(); const s = $('#noteSaveStatus'); if (s) s.textContent = '✓ Salvo automaticamente'; }, 600);
 }
 function closeCardNote() {
+  flushCardNote();
   $('#cardNoteOv').classList.remove('show');
   editingNoteId = null;
+  render();   // reflete o indicador "tem anotação" no card
 }
+$('#noteText').addEventListener('input', scheduleNoteAutoSave);
 $('#noteClose').onclick = closeCardNote;
-$('#noteSave').onclick = saveCardNote;
+$('#noteSave').onclick = closeCardNote;
 $('#cardNoteOv').onmousedown = e => { if(e.target.id==='cardNoteOv') closeCardNote(); };
 
 // Editor Formatting Events
@@ -1143,24 +1246,29 @@ document.querySelectorAll('.ed-btn[data-cmd]').forEach(b => {
     e.preventDefault();
     document.execCommand(b.dataset.cmd, false, null);
     $('#noteText').focus();
+    scheduleNoteAutoSave();
   };
 });
 $('#edCode').onclick = e => {
   e.preventDefault();
   document.execCommand('formatBlock', false, 'PRE');
   $('#noteText').focus();
+  scheduleNoteAutoSave();
 };
 $('#edColor').oninput = e => {
   document.execCommand('foreColor', false, e.target.value);
   $('#noteText').focus();
+  scheduleNoteAutoSave();
 };
 $('#edFont').onchange = e => {
   document.execCommand('fontName', false, e.target.value);
   $('#noteText').focus();
+  scheduleNoteAutoSave();
 };
 $('#edSize').onchange = e => {
   document.execCommand('fontSize', false, e.target.value);
   $('#noteText').focus();
+  scheduleNoteAutoSave();
 };
 document.querySelectorAll('#prPick button').forEach(b=> b.onclick=()=>{
   document.querySelectorAll('#prPick button').forEach(x=>{x.classList.remove('on');x.style.background='';});
@@ -1308,10 +1416,11 @@ $('#clearNotes').onclick=async()=>{
 
 // ---------- SETTINGS ----------
 function closeSet(){ $('#setOv').classList.remove('show'); }
-$('#settingsBtn').onclick=()=>{ $('#fEndpoint').value=state.endpoint; $('#fTab').value=state.tab; $('#setMsg').textContent=''; populateAbFields(); $('#setOv').classList.add('show'); };
+$('#settingsBtn').onclick=()=>{ $('#fEndpoint').value=state.endpoint; $('#fTab').value=state.tab; $('#fSortBy').value=state.sortBy||'manual'; $('#setMsg').textContent=''; populateAbFields(); $('#setOv').classList.add('show'); };
 $('#setClose').onclick=closeSet;
 $('#setOv').onmousedown=e=>{ if(e.target.id==='setOv') $('#setClose').onclick(); };
-$('#setSave').onclick=()=>{ state.endpoint=$('#fEndpoint').value.trim(); state.tab=$('#fTab').value.trim(); readAbFields(); save(); updateSyncPill(); closeSet(); updateAbNext(); };
+$('#fSortBy').onchange=()=>{ state.sortBy=$('#fSortBy').value; save(); render(); };
+$('#setSave').onclick=()=>{ state.endpoint=$('#fEndpoint').value.trim(); state.tab=$('#fTab').value.trim(); state.sortBy=$('#fSortBy').value; readAbFields(); save(); render(); updateSyncPill(); closeSet(); updateAbNext(); };
 $('#testConn').onclick=testConn; $('#pullBtn').onclick=pullSheet;
 $('#syncColsBtn').onclick=async()=>{ const m=$('#setMsg'); m.textContent='Lendo status…';
   const list=await syncStatusCols(); render(); m.textContent = list.length?`✓ ${list.length} status viraram colunas (ordem da validação).`:'⚠ Nenhuma validação de status encontrada na coluna B.'; };
@@ -1324,14 +1433,14 @@ $('#exportBtn').onclick=()=>{ const b=new Blob([JSON.stringify(state,null,2)],{t
   const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='kanban-backup.json'; a.click(); };
 $('#importBtn').onclick=()=>$('#importFile').click();
 $('#importFile').onchange=e=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader();
-  r.onload=()=>{ try{ const s=JSON.parse(r.result); if(s.cols){ state=s; if(!state.autoBackup) state.autoBackup={enabled:false,freq:'daily',hours:4,time:'08:00',lastRun:0}; save(); render(); updateSyncPill(); updateAbNext(); toast('✓ Backup importado'); $('#setOv').classList.remove('show'); } }catch(err){ toast('⚠ Arquivo inválido'); } }; r.readAsText(f); };
+  r.onload=()=>{ try{ const s=JSON.parse(r.result); if(s.cols){ state=s; if(!state.autoBackup) state.autoBackup={enabled:false,freq:'daily',hours:4,time:'08:00',lastRun:0}; if(!state.sortBy) state.sortBy='manual'; save(); render(); updateSyncPill(); updateAbNext(); toast('✓ Backup importado'); $('#setOv').classList.remove('show'); } }catch(err){ toast('⚠ Arquivo inválido'); } }; r.readAsText(f); };
 
 // ---------- TOPBAR ----------
 $('#search').addEventListener('input',e=>{ query=e.target.value.toLowerCase().trim(); render(); $('#searchClear').classList.toggle('show',!!e.target.value); });
 $('#searchClear').onclick=()=>{ $('#search').value=''; query=''; render(); $('#searchClear').classList.remove('show'); $('#search').focus(); };
 $('#addColBtn').onclick=addColumn;
 $('#themeBtn').onclick=()=>{ state.theme = state.theme==='dark'?'light':'dark'; save(); render(); };
-document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeCard(); hideCardTooltipNow(); $('#setOv').classList.remove('show'); $('#filterPop').classList.remove('show'); $('#colorPop').classList.remove('show'); $('#syncHistPanel').classList.remove('show'); }
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeCard(); if(editingNoteId) closeCardNote(); hideCardTooltipNow(); closeCliLinkPop(); $('#setOv').classList.remove('show'); $('#filterPop').classList.remove('show'); $('#colorPop').classList.remove('show'); $('#syncHistPanel').classList.remove('show'); }
   if((e.ctrlKey||e.metaKey)&&e.key==='f'){ e.preventDefault(); $('#search').focus(); } });
 
 // ---------- FILTROS / COR DOS STATUS ----------
@@ -1366,6 +1475,7 @@ document.addEventListener('click',e=>{
   if(!e.target.closest('#colorPop') && !e.target.classList.contains('col-dot')) $('#colorPop').classList.remove('show');
   if(!e.target.closest('#histPanel') && !e.target.closest('#histBtn')) $('#histPanel').classList.remove('show');
   if(!e.target.closest('#cardTooltip') && !e.target.closest('.card')) hideCardTooltipNow();
+  if(!e.target.closest('#cliLinkPop') && !e.target.closest('#cliLinkBtn')) closeCliLinkPop();
 });
 
 // ---------- TOOLTIP DO CARD (hover 1s → mostra Observação + Nota local) ----------
