@@ -647,7 +647,7 @@
             <option value="prio">Prioridade</option>
             <option value="date">Data de adição</option>
           </select>
-          <p class="hint" style="margin:8px 0 0">Define a ordem dos cards dentro de cada coluna. É uma configuração fixa — fica aplicada até você trocar aqui, não é um filtro que se limpa sozinho. Escolha <b>Manual</b> pra voltar a arrastar livremente.</p>
+          <p class="hint" style="margin:8px 0 0">Arruma os cards <b>uma vez</b> ao escolher aqui (não fica reordenando sozinho). Continua valendo pra <b>tarefas novas</b> — entram já na posição certa. Depois disso, arraste à vontade: o que você arrumar na mão sempre gruda.</p>
         </div>
         <hr style="border:none;border-top:1px solid var(--line);margin:4px 0">
         <div class="field"><label>Backup automático</label>
@@ -781,7 +781,7 @@ const $ = s => document.querySelector(s);
 const uid = () => 'c'+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
 // Versão: v<base>.<nº de commits em main no GitHub>. Bump manual do nº a cada commit novo
 // (git log --oneline | wc -l). Sem build step aqui, então não dá pra calcular sozinho em runtime.
-const APP_VERSION = 'v1.0.31';
+const APP_VERSION = 'v1.0.32';
 const KEY = 'kanban_ciss_v1';
 const COLORS = ['#5b8cff','#3fb950','#d6a533','#a371f7','#39c5cf','#e5534b','#ec6cb9'];
 const NO_STATUS = 'Sem status';   // coluna sintética = status vazio na planilha
@@ -817,7 +817,7 @@ function render(){
   const hidden = (state.filter&&state.filter.hidden)||[];
   state.cols.forEach(col=>{
     if(hidden.includes(col.id)) return;            // coluna oculta pelo filtro
-    const visible = sortCardsList(col.cards.filter(c=>matchQ(c)&&matchFilter(c)));
+    const visible = col.cards.filter(c=>matchQ(c)&&matchFilter(c));
     if(query && !visible.length) return;           // pesquisando: só mostra colunas com resultado
     const el = document.createElement('div');
     el.className='col'; el.dataset.col=col.id;
@@ -895,6 +895,13 @@ function sortCardsList(list){
     case 'date':   arr.sort((a,b)=> (a.createdAt||0) - (b.createdAt||0)); break;
   }
   return arr;
+}
+// Arruma UMA VEZ (não fica reaplicando a cada render — senão o arrasto manual nunca "grudava").
+// Dispara ao trocar a configuração de ordenação. Depois disso, arrastar sempre gruda do jeito que você deixar.
+function applySortNow(){
+  if(!state.sortBy || state.sortBy==='manual') return;
+  state.cols.forEach(col => { col.cards = sortCardsList(col.cards); });
+  save(); render();
 }
 function updateFilterBadge(){
   const f = state.filter||{};
@@ -1033,7 +1040,8 @@ function addCard(colId, title){
   const cb = document.querySelector('[data-addsync="'+colId+'"]');
   const sync = !!(cb && cb.checked && state.endpoint);    // o flag é decidido aqui, na criação
   const card = {id:uid(), title, desc:'', ticket:'', cli:'', prio:'none', linked:sync, createdAt:Date.now()};
-  col.cards.unshift(card);
+  if(state.sortBy && state.sortBy!=='manual'){ col.cards.push(card); col.cards = sortCardsList(col.cards); }
+  else col.cards.unshift(card);
   save(); render();
   logAction('create', card.id, card.title, `Criada na coluna ${col.name}`);
   if(sync) pushCardAuto(card, col.name);
@@ -1476,8 +1484,8 @@ function closeSet(){ $('#setOv').classList.remove('show'); }
 $('#settingsBtn').onclick=()=>{ $('#fEndpoint').value=state.endpoint; $('#fTab').value=state.tab; $('#fSortBy').value=state.sortBy||'manual'; $('#setMsg').textContent=''; populateAbFields(); $('#setOv').classList.add('show'); };
 $('#setClose').onclick=closeSet;
 $('#setOv').onmousedown=e=>{ if(e.target.id==='setOv') $('#setClose').onclick(); };
-$('#fSortBy').onchange=()=>{ state.sortBy=$('#fSortBy').value; save(); render(); };
-$('#setSave').onclick=()=>{ state.endpoint=$('#fEndpoint').value.trim(); state.tab=$('#fTab').value.trim(); state.sortBy=$('#fSortBy').value; readAbFields(); save(); render(); updateSyncPill(); closeSet(); updateAbNext(); };
+$('#fSortBy').onchange=()=>{ state.sortBy=$('#fSortBy').value; save(); render(); applySortNow(); };
+$('#setSave').onclick=()=>{ state.endpoint=$('#fEndpoint').value.trim(); state.tab=$('#fTab').value.trim(); state.sortBy=$('#fSortBy').value; readAbFields(); applySortNow(); save(); render(); updateSyncPill(); closeSet(); updateAbNext(); };
 $('#testConn').onclick=testConn; $('#pullBtn').onclick=pullSheet;
 $('#syncColsBtn').onclick=async()=>{ const m=$('#setMsg'); m.textContent='Lendo status…';
   const list=await syncStatusCols(); render(); m.textContent = list.length?`✓ ${list.length} status viraram colunas (ordem da validação).`:'⚠ Nenhuma validação de status encontrada na coluna B.'; };
