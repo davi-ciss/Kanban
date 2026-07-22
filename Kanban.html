@@ -212,6 +212,10 @@
   .modal-h{display:flex; align-items:center; gap:10px; padding:16px 18px; border-bottom:1px solid var(--line)}
   .modal-h .ttl{font-weight:700; font-size:15px; flex:1}
   .modal-h.has-meta{align-items:flex-start}
+  #noteModalTtl{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0}
+  #cardNoteOv.maximized{padding:0}
+  #cardNoteOv.maximized .modal{width:100vw!important; max-width:100vw!important; height:100vh!important; max-height:100vh!important; border-radius:0}
+  #noteMaximize.on{color:var(--accent)}
   .modal-h-text{display:flex; flex-direction:column; gap:2px; flex:1; min-width:0}
   .modal-h-text .ttl{flex:none}
   .modal-h.has-meta #cardClose{margin-top:1px}
@@ -578,7 +582,8 @@
   <div class="ov" id="cardNoteOv">
     <div class="modal" style="width:90vw; max-width:1000px; height:90vh; max-height:800px; display:flex; flex-direction:column">
       <div class="modal-h" style="flex:none">
-        <span class="ttl">Anotações Internas</span>
+        <span class="ttl" id="noteModalTtl">Anotações Internas</span>
+        <button class="tbtn" id="noteMaximize" title="Tela cheia">⛶</button>
         <button class="tbtn" id="noteClose">✕</button>
       </div>
       <div class="modal-b" style="flex:1; display:flex; flex-direction:column; gap:0; padding:10px; overflow:hidden">
@@ -791,7 +796,7 @@ const $ = s => document.querySelector(s);
 const uid = () => 'c'+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
 // Versão: v<base>.<nº de commits em main no GitHub>. Bump manual do nº a cada commit novo
 // (git log --oneline | wc -l). Sem build step aqui, então não dá pra calcular sozinho em runtime.
-const APP_VERSION = 'v1.0.36';
+const APP_VERSION = 'v1.0.37';
 const KEY = 'kanban_ciss_v1';
 const COLORS = ['#5b8cff','#3fb950','#d6a533','#a371f7','#39c5cf','#e5534b','#ec6cb9'];
 const NO_STATUS = 'Sem status';   // coluna sintética = status vazio na planilha
@@ -1284,9 +1289,21 @@ function openCardNote(id) {
   editingNoteId = id;
   $('#noteText').innerHTML = card.localNotes || '';
   $('#noteSaveStatus').textContent = '';
+  const ttl = card.title || '(sem título)';
+  $('#noteModalTtl').textContent = 'Anotações — ' + ttl;
+  $('#noteModalTtl').title = ttl;
   $('#cardNoteOv').classList.add('show');
   $('#noteText').focus();
 }
+let noteMaximized = false;   // preferência da sessão (não fica salva) — reabrir outro card mantém o modo
+function setNoteMaximized(v){
+  noteMaximized = v;
+  $('#cardNoteOv').classList.toggle('maximized', v);
+  $('#noteMaximize').classList.toggle('on', v);
+  $('#noteMaximize').title = v ? 'Restaurar tamanho' : 'Tela cheia';
+  $('#noteMaximize').textContent = v ? '⤡' : '⛶';
+}
+$('#noteMaximize').onclick = () => setNoteMaximized(!noteMaximized);
 function flushCardNote(){
   clearTimeout(noteSaveTimer);
   if (!editingNoteId) return;
