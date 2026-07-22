@@ -211,6 +211,7 @@
   @keyframes pop{from{transform:translateY(8px) scale(.98);opacity:0}to{transform:none;opacity:1}}
   .modal-h{display:flex; align-items:center; gap:10px; padding:16px 18px; border-bottom:1px solid var(--line)}
   .modal-h .ttl{font-weight:700; font-size:15px; flex:1}
+  .card-meta-dates{font-size:10.5px; font-weight:500; color:var(--txt-mut); text-align:right; line-height:1.55; white-space:nowrap}
   .modal-b{padding:16px 18px; display:flex; flex-direction:column; gap:14px; max-height:64vh; overflow-y:auto}
   .field label{display:block; font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--txt-mut); margin-bottom:6px}
   .field input,.field textarea,.field select{
@@ -526,6 +527,7 @@
   <div class="ov" id="cardOv">
     <div class="modal">
       <div class="modal-h"><span class="ttl" id="cardModalTtl">Tarefa</span>
+        <span class="card-meta-dates" id="cardMetaDates"></span>
         <button class="tbtn" id="cardClose">✕</button></div>
       <div class="modal-b">
         <div class="field"><label>Título</label><textarea id="fTitle" rows="2" placeholder="O que precisa ser feito"></textarea></div>
@@ -781,7 +783,7 @@ const $ = s => document.querySelector(s);
 const uid = () => 'c'+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
 // Versão: v<base>.<nº de commits em main no GitHub>. Bump manual do nº a cada commit novo
 // (git log --oneline | wc -l). Sem build step aqui, então não dá pra calcular sozinho em runtime.
-const APP_VERSION = 'v1.0.33';
+const APP_VERSION = 'v1.0.34';
 const KEY = 'kanban_ciss_v1';
 const COLORS = ['#5b8cff','#3fb950','#d6a533','#a371f7','#39c5cf','#e5534b','#ec6cb9'];
 const NO_STATUS = 'Sem status';   // coluna sintética = status vazio na planilha
@@ -1063,7 +1065,8 @@ function addCard(colId, title){
   const col = state.cols.find(c=>c.id===colId); if(!col) return;
   const cb = document.querySelector('[data-addsync="'+colId+'"]');
   const sync = !!(cb && cb.checked && state.endpoint);    // o flag é decidido aqui, na criação
-  const card = {id:uid(), title, desc:'', ticket:'', cli:'', prio:'none', linked:sync, createdAt:Date.now()};
+  const now = Date.now();
+  const card = {id:uid(), title, desc:'', ticket:'', cli:'', prio:'none', linked:sync, createdAt:now, updatedAt:now};
   if(state.sortBy && state.sortBy!=='manual') insertBySortKey(col, card);
   else col.cards.unshift(card);
   save(); render();
@@ -1077,6 +1080,7 @@ function moveCard(id, fromCol, toCol, order){
   const [card] = from.cards.splice(idx,1);
   to.cards.push(card);
   to.cards.sort((a,b)=> order.indexOf(a.id)-order.indexOf(b.id));
+  if(fromCol!==toCol) card.updatedAt = Date.now();
   save(); render();
   if(fromCol!==toCol) logAction('move', card.id, card.title, `Movida de ${from.name} para ${to.name}`);
   if(card.linked && fromCol!==toCol) pushStatus(card, to.name);
@@ -1101,6 +1105,7 @@ function openCard(id, colId){
   editing = {card, colId};
   $('#fTitle').value=card.title; $('#fDesc').value=card.desc||''; $('#fTicket').value=card.ticket||''; $('#fCli').value=card.cli||'';
   $('#fJira').value=card.jira||''; $('#fAtrib').value=card.atrib||'';
+  $('#cardMetaDates').innerHTML = `Criado ${fmtWhen(card.createdAt)}<br>Editado ${fmtWhen(card.updatedAt||card.createdAt)}`;
   pendingCliLink = card.cliLink || ''; updateCliLinkBtn();
   let eqs = [...new Set(state.cols.flatMap(c=>c.cards).map(c=>c.equipe).filter(Boolean))].sort();
   if(!eqs.length) eqs = ['N3 Fábrica','Comitê Contábil', 'Performance e Segurança'];
@@ -1222,6 +1227,8 @@ function saveCard(pushAfter){
     const col = state.cols.find(c=>c.id===editing.colId);
     if(col) insertBySortKey(col, editing.card);
   }
+  editing.card.updatedAt = Date.now();
+  $('#cardMetaDates').innerHTML = `Criado ${fmtWhen(editing.card.createdAt)}<br>Editado ${fmtWhen(editing.card.updatedAt)}`;
   save(); render();
   logAction('edit', editing.card.id, editing.card.title, 'Tarefa editada/atualizada');
   if(editing.card.linked && state.endpoint){     // salvar/atualizar sempre sincroniza
@@ -1450,9 +1457,10 @@ async function pullSheet(){
         if(hit.col!==col){ hit.col.cards.splice(hit.col.cards.indexOf(c),1); col.cards.push(c); moved++; }
         else updated++;
       }else{
+        const nowPull = Date.now();
         col.cards.unshift({id:uid(), title:row.assunto||('Ticket '+(row.ticket||'')), desc:row.obs||'',
           ticket:String(row.ticket||''), cli:row.cliente||'', jira:String(row.jira||''), atrib:String(row.atrib||''),
-          prio:'none', linked:true, rowKey:key||row.ticket, createdAt:Date.now()});
+          prio:'none', linked:true, rowKey:key||row.ticket, createdAt:nowPull, updatedAt:nowPull});
         added++;
       }
     });
