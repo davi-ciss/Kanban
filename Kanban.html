@@ -781,7 +781,7 @@ const $ = s => document.querySelector(s);
 const uid = () => 'c'+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
 // Versão: v<base>.<nº de commits em main no GitHub>. Bump manual do nº a cada commit novo
 // (git log --oneline | wc -l). Sem build step aqui, então não dá pra calcular sozinho em runtime.
-const APP_VERSION = 'v1.0.32';
+const APP_VERSION = 'v1.0.33';
 const KEY = 'kanban_ciss_v1';
 const COLORS = ['#5b8cff','#3fb950','#d6a533','#a371f7','#39c5cf','#e5534b','#ec6cb9'];
 const NO_STATUS = 'Sem status';   // coluna sintética = status vazio na planilha
@@ -882,19 +882,43 @@ const SORT_LABELS = {
   date:   'Data de adição'
 };
 const PRIO_RANK = {urgent:0, high:1, med:2, low:3, none:4};
+const sortCollator = new Intl.Collator('pt-BR', {sensitivity:'base'});
+function sortCompare(a, b, by){
+  switch(by){
+    case 'title':  return sortCollator.compare(a.title||'', b.title||'');
+    case 'client': return sortCollator.compare(a.cli||'', b.cli||'');
+    case 'ticket': return (parseInt(String(a.ticket||'').replace(/\D/g,''),10)||Infinity) - (parseInt(String(b.ticket||'').replace(/\D/g,''),10)||Infinity);
+    case 'prio':   return (PRIO_RANK[a.prio||'none']??4) - (PRIO_RANK[b.prio||'none']??4);
+    case 'date':   return (a.createdAt||0) - (b.createdAt||0);
+    default: return 0;
+  }
+}
+// Chave "crua" do card no critério ativo — usada só pra detectar se o campo relevante mudou ao editar.
+function sortKeyOf(card, by){
+  switch(by){
+    case 'title':  return card.title||'';
+    case 'client': return card.cli||'';
+    case 'ticket': return card.ticket||'';
+    case 'prio':   return card.prio||'none';
+    case 'date':   return card.createdAt||0;
+    default: return null;
+  }
+}
 function sortCardsList(list){
   const by = state.sortBy || 'manual';
   if(by === 'manual') return list;                 // preserva a ordem de arrastar (não muta col.cards)
-  const arr = list.slice();
-  const collator = new Intl.Collator('pt-BR', {sensitivity:'base'});
-  switch(by){
-    case 'title':  arr.sort((a,b)=> collator.compare(a.title||'', b.title||'')); break;
-    case 'client': arr.sort((a,b)=> collator.compare(a.cli||'', b.cli||'')); break;
-    case 'ticket': arr.sort((a,b)=> (parseInt(String(a.ticket||'').replace(/\D/g,''),10)||Infinity) - (parseInt(String(b.ticket||'').replace(/\D/g,''),10)||Infinity)); break;
-    case 'prio':   arr.sort((a,b)=> (PRIO_RANK[a.prio||'none']??4) - (PRIO_RANK[b.prio||'none']??4)); break;
-    case 'date':   arr.sort((a,b)=> (a.createdAt||0) - (b.createdAt||0)); break;
-  }
-  return arr;
+  return list.slice().sort((a,b)=> sortCompare(a,b,by));
+}
+// Posiciona SÓ 'card' entre os vizinhos atuais (que ficam exatamente onde estão) — não embaralha
+// a ordem manual dos outros cards da coluna. Usado ao criar um card e ao editar o campo do critério ativo.
+function insertBySortKey(col, card){
+  const by = state.sortBy;
+  if(!by || by==='manual') return;
+  const others = col.cards.filter(c => c.id !== card.id);
+  let idx = others.findIndex(c => sortCompare(card, c, by) < 0);
+  if(idx === -1) idx = others.length;
+  others.splice(idx, 0, card);
+  col.cards = others;
 }
 // Arruma UMA VEZ (não fica reaplicando a cada render — senão o arrasto manual nunca "grudava").
 // Dispara ao trocar a configuração de ordenação. Depois disso, arrastar sempre gruda do jeito que você deixar.
@@ -1040,7 +1064,7 @@ function addCard(colId, title){
   const cb = document.querySelector('[data-addsync="'+colId+'"]');
   const sync = !!(cb && cb.checked && state.endpoint);    // o flag é decidido aqui, na criação
   const card = {id:uid(), title, desc:'', ticket:'', cli:'', prio:'none', linked:sync, createdAt:Date.now()};
-  if(state.sortBy && state.sortBy!=='manual'){ col.cards.push(card); col.cards = sortCardsList(col.cards); }
+  if(state.sortBy && state.sortBy!=='manual') insertBySortKey(col, card);
   else col.cards.unshift(card);
   save(); render();
   logAction('create', card.id, card.title, `Criada na coluna ${col.name}`);
@@ -1181,7 +1205,10 @@ function readForm(){
   const on=document.querySelector('#prPick button.on'); c.prio = on?on.dataset.p:'none';
 }
 function saveCard(pushAfter){
-  if(!editing) return; readForm();
+  if(!editing) return;
+  const by = state.sortBy;
+  const preKey = (by && by!=='manual') ? sortKeyOf(editing.card, by) : null;   // valor ANTES de readForm() sobrescrever
+  readForm();
   const sel = $('#fStatus') ? $('#fStatus').dataset.val : editing.colId;
   const colChanged = sel && sel !== editing.colId;
   if(colChanged){
@@ -1189,6 +1216,11 @@ function saveCard(pushAfter){
     const to   = state.cols.find(c=>c.id===sel);
     const i = from.cards.findIndex(c=>c.id===editing.card.id);
     if(i>=0){ const [cd]=from.cards.splice(i,1); to.cards.push(cd); editing.colId=sel; }
+  }
+  if(by && by!=='manual' && sortKeyOf(editing.card, by) !== preKey){
+    // o campo do critério ativo mudou (ex.: prioridade) — reposiciona SÓ este card, sem mexer nos outros
+    const col = state.cols.find(c=>c.id===editing.colId);
+    if(col) insertBySortKey(col, editing.card);
   }
   save(); render();
   logAction('edit', editing.card.id, editing.card.title, 'Tarefa editada/atualizada');
