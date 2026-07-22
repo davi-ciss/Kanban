@@ -211,7 +211,11 @@
   @keyframes pop{from{transform:translateY(8px) scale(.98);opacity:0}to{transform:none;opacity:1}}
   .modal-h{display:flex; align-items:center; gap:10px; padding:16px 18px; border-bottom:1px solid var(--line)}
   .modal-h .ttl{font-weight:700; font-size:15px; flex:1}
-  .card-meta-dates{font-size:11px; font-weight:500; color:var(--txt-mut); margin:-4px 0 0}
+  .modal-h.has-meta{align-items:flex-start}
+  .modal-h-text{display:flex; flex-direction:column; gap:2px; flex:1; min-width:0}
+  .modal-h-text .ttl{flex:none}
+  .modal-h.has-meta #cardClose{margin-top:1px}
+  .card-meta-dates{font-size:10.5px; font-weight:500; color:var(--txt-mut); line-height:1.3}
   .modal-b{padding:16px 18px; display:flex; flex-direction:column; gap:14px; max-height:64vh; overflow-y:auto}
   .field label{display:block; font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--txt-mut); margin-bottom:6px}
   .field input,.field textarea,.field select{
@@ -526,10 +530,14 @@
   <!-- CARD MODAL -->
   <div class="ov" id="cardOv">
     <div class="modal">
-      <div class="modal-h"><span class="ttl" id="cardModalTtl">Tarefa</span>
-        <button class="tbtn" id="cardClose">✕</button></div>
+      <div class="modal-h has-meta">
+        <div class="modal-h-text">
+          <span class="ttl" id="cardModalTtl">Tarefa</span>
+          <span class="card-meta-dates" id="cardMetaDates"></span>
+        </div>
+        <button class="tbtn" id="cardClose">✕</button>
+      </div>
       <div class="modal-b">
-        <span class="card-meta-dates" id="cardMetaDates"></span>
         <div class="field"><label>Título</label><textarea id="fTitle" rows="2" placeholder="O que precisa ser feito"></textarea></div>
         <div class="field"><label>Detalhes / observação</label><textarea id="fDesc" rows="3" placeholder="Contexto, links, passos…"></textarea></div>
         <div class="row2">
@@ -783,7 +791,7 @@ const $ = s => document.querySelector(s);
 const uid = () => 'c'+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
 // Versão: v<base>.<nº de commits em main no GitHub>. Bump manual do nº a cada commit novo
 // (git log --oneline | wc -l). Sem build step aqui, então não dá pra calcular sozinho em runtime.
-const APP_VERSION = 'v1.0.35';
+const APP_VERSION = 'v1.0.36';
 const KEY = 'kanban_ciss_v1';
 const COLORS = ['#5b8cff','#3fb950','#d6a533','#a371f7','#39c5cf','#e5534b','#ec6cb9'];
 const NO_STATUS = 'Sem status';   // coluna sintética = status vazio na planilha
