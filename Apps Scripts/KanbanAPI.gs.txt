@@ -1,0 +1,346 @@
+/**
+ * Kanban — endpoint Apps Script (Web App) da planilha de Acompanhamento.
+ * Compatível com QUALQUER analista: a aba usada vem do parâmetro ?tab= (o nome
+ * que a pessoa põe no Kanban). O Responsável gravado na Fábrica = nome dessa aba.
+ * Mapeia colunas por NOME de cabeçalho (aba do analista e aba Apoios), então não
+ * quebra quando inserem/movem/renomeiam colunas. Replica as regras do onEdit ao gravar.
+ * Deploy: Implantar > Gerenciar implantações > editar > Nova versão. URL /exec.
+ */
+
+var FABRICA_ID = "1SA3WD5srsNt-7nutVkKZwwc2rmkalK8N2MSCSX_sMp4";
+
+// Aba do analista (Comitê) — campo lógico -> nomes de cabeçalho aceitos (sem acento)
+var KB_COLMAP = {
+  ticket:  ['ticket','chamado'],
+  status:  ['status'],
+  assunto: ['assunto','titulo','título','descricao','descrição'],
+  cliente: ['cliente'],
+  obs:     ['observacao','observação','obs'],
+  atrib:   ['atribuido','atribuído','atribuido?','atribuído?'],
+  jira:    ['jira'],
+  alt:     ['alteracao de status','alteração de status'],
+  addedat: ['adicionado em','adicionado em:','adicionado']
+};
+
+// Aba "Apoios" (Fábrica) por NOME de cabeçalho — robusto a inserções de coluna.
+var APOIOS_COLMAP = {
+  equipe:    ['equipe fabrica','equipe fábrica','equipe'],
+  ticket:    ['ticket','chamado'],
+  descricao: ['descricao','descrição','assunto','titulo','título'],
+  resp:      ['responsavel','responsável'],
+  cliente:   ['cliente'],
+  data:      ['data'],
+  jira:      ['jira'],
+  status:    ['status']
+};
+function kbApoiosIdx_(fab){
+  var lastCol = Math.max(1, fab.getLastColumn());
+  var head = fab.getRange(1,1,1,lastCol).getValues()[0].map(kbNorm_);
+  var idx = {};
+  for(var f in APOIOS_COLMAP){ idx[f] = -1; var ns = APOIOS_COLMAP[f];
+    for(var i=0;i<head.length;i++){ if(ns.indexOf(head[i])!==-1){ idx[f]=i; break; } } }
+  return idx;
+}
+
+function doGet(e){
+  var q = (e && e.parameter) ? e.parameter : {};
+  var cb = q.callback || 'callback';
+  var out;
+  try{
+    var sh = kbGetSheet_(q.tab);
+    switch((q.action||'').toLowerCase()){
+      case 'ping':     out = {ok:true, tab:sh.getName(), count:Math.max(0, sh.getLastRow()-1)}; break;
+      case 'statuses': out = {ok:true, statuses:kbStatuses_(sh)}; break;
+      case 'equipes':  out = {ok:true, equipes:kbEquipes_()}; break;
+      case 'list':     out = {ok:true, rows:kbListRows_(sh)}; break;
+      case 'upsert':   out = kbUpsert_(sh, q); break;
+      case 'delete':   out = kbDelete_(sh, q); break;
+      default:         out = {ok:false, error:'Ação desconhecida: '+(q.action||'(vazia)')};
+    }
+  }catch(err){ out = {ok:false, error:String(err)}; }
+  return ContentService
+    .createTextOutput(cb + '(' + JSON.stringify(out) + ')')
+    .setMimeType(ContentService.MimeType.JAVASCRIPT);
+}
+
+function kbGetSheet_(tab){
+  tab = String(tab||'').trim();
+  if(!tab) throw new Error('Informe seu nome (aba) nas Configurações do Kanban');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(tab);
+  if(!sh) throw new Error('Aba "'+tab+'" não encontrada nesta planilha');
+  return sh;
+}
+
+function kbNorm_(s){
+  return String(s==null?'':s).toLowerCase().trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,''); // remove acentos
+}
+
+function kbHeaderIndex_(sh){
+  var lastCol = Math.max(1, sh.getLastColumn());
+  var head = sh.getRange(1,1,1,lastCol).getValues()[0].map(kbNorm_);
+  var idx = {};
+  for(var field in KB_COLMAP){
+    idx[field] = -1;
+    var names = KB_COLMAP[field];
+    for(var i=0;i<head.length;i++){ if(names.indexOf(head[i])!==-1){ idx[field]=i; break; } }
+  }
+  return idx;
+}
+
+function kbListRows_(sh){
+  var lastRow = sh.getLastRow(), lastCol = Math.max(1, sh.getLastColumn());
+  if(lastRow < 2) return [];
+  var idx = kbHeaderIndex_(sh);
+  var vals = sh.getRange(2,1,lastRow-1,lastCol).getValues();
+  var rows = [];
+  for(var r=0;r<vals.length;r++){
+    var row = vals[r];
+    var ticket = idx.ticket>=0 ? row[idx.ticket] : '';
+    var assunto= idx.assunto>=0? row[idx.assunto]: '';
+    if(String(ticket).trim()==='' && String(assunto).trim()==='') continue;
+    rows.push({
+      key: String(ticket||('R'+(r+2))),
+      ticket: ticket, status: idx.status>=0?row[idx.status]:'',
+      assunto: assunto, cliente: idx.cliente>=0?row[idx.cliente]:'',
+      obs: idx.obs>=0?row[idx.obs]:'',
+      jira: idx.jira>=0?row[idx.jira]:'',
+      atrib: idx.atrib>=0?row[idx.atrib]:''
+    });
+  }
+  return rows;
+}
+
+function kbUpsert_(sh, q){
+  var idx = kbHeaderIndex_(sh);
+  if(idx.ticket < 0 && idx.assunto < 0)
+    return {ok:false, error:'Cabeçalhos Ticket/Assunto não encontrados na linha 1'};
+  var lastRow = sh.getLastRow();
+  var rawKey = String(q.key==null?'':q.key).trim();
+  var ticketDigits = kbDigits_(q.ticket || '');
+  var targetRow = -1;
+
+  var mR = rawKey.match(/^(?:R|row)(\d+)$/i);
+  if(mR){ var rn = parseInt(mR[1],10); if(rn>=2 && rn<=lastRow) targetRow = rn; }
+
+  if(targetRow === -1 && ticketDigits && idx.ticket>=0 && lastRow>=2){
+    var col = sh.getRange(2, idx.ticket+1, lastRow-1, 1).getValues();
+    for(var i=0;i<col.length;i++){ if(kbDigits_(col[i][0])===ticketDigits){ targetRow = i+2; break; } }
+  }
+
+  if(targetRow === -1 && !ticketDigits && q.assunto && idx.assunto>=0 && lastRow>=2){
+    var colA = sh.getRange(2, idx.assunto+1, lastRow-1, 1).getValues();
+    var assTarget = String(q.assunto).trim().toLowerCase();
+    for(var aI=0;aI<colA.length;aI++){ if(String(colA[aI][0]||'').trim().toLowerCase()===assTarget){ targetRow = aI+2; break; } }
+  }
+
+  var novo = false;
+  if(targetRow === -1){ targetRow = lastRow + 1; novo = true; }
+
+  var statusAtual = (idx.status>=0) ? String(sh.getRange(targetRow, idx.status+1).getValue()) : '';
+
+  function set(field, val){ if(idx[field]>=0 && val!==undefined && val!=='') sh.getRange(targetRow, idx[field]+1).setValue(val); }
+
+  // Ticket -> link Zendesk em PRETO
+  if(ticketDigits && idx.ticket>=0){
+    var urlZ = 'https://cisssa.zendesk.com/agent/tickets/' + ticketDigits;
+    var pretoZ = SpreadsheetApp.newTextStyle().setForegroundColor('#000000').build();
+    var rtZ = SpreadsheetApp.newRichTextValue().setText(ticketDigits).setLinkUrl(urlZ).setTextStyle(pretoZ).build();
+    sh.getRange(targetRow, idx.ticket+1).setRichTextValue(rtZ);
+  }
+
+  set('assunto', q.assunto);
+  set('cliente', q.cliente);
+  set('obs',     q.obs);
+  set('atrib',   q.atrib);
+
+  var statusNovo = (q.status!==undefined) ? String(q.status) : statusAtual;
+  if(idx.status>=0 && q.status!==undefined) sh.getRange(targetRow, idx.status+1).setValue(q.status);
+
+  if(idx.alt>=0 && q.status!==undefined && statusNovo !== statusAtual){
+    if(statusNovo === '') sh.getRange(targetRow, idx.alt+1).clearContent();
+    else sh.getRange(targetRow, idx.alt+1).setValue(new Date());
+  }
+
+  // Jira -> link Atlassian preto, só reescreve se mudou
+  if(idx.jira>=0 && q.jira!==undefined && String(q.jira)!==''){
+    var curJ = String(sh.getRange(targetRow, idx.jira+1).getValue()).trim();
+    var jiraKey = String(q.jira).trim();
+    if(curJ !== jiraKey){
+      var mj = jiraKey.match(/([A-Za-z]+-\d+)/);
+      if(mj){
+        var urlJ = 'https://cisspoder.atlassian.net/browse/' + mj[1];
+        var preto = SpreadsheetApp.newTextStyle().setForegroundColor('#000000').build();
+        var rtJ = SpreadsheetApp.newRichTextValue().setText(mj[1]).setLinkUrl(urlJ).setTextStyle(preto).build();
+        sh.getRange(targetRow, idx.jira+1).setRichTextValue(rtJ);
+      } else {
+        sh.getRange(targetRow, idx.jira+1).setValue(jiraKey);
+      }
+    }
+  }
+
+  if(idx.addedat>=0){
+    var addCell = sh.getRange(targetRow, idx.addedat+1);
+    if(String(addCell.getValue()) === '') addCell.setValue(new Date());
+  }
+
+  if(ticketDigits) kbPropagarFabrica_(sh, idx, targetRow, q.equipe||'');
+
+  var outKey = ticketDigits || ('R'+targetRow);
+  return {ok:true, key:outKey, row:targetRow, novo:novo};
+}
+
+function kbPropagarFabrica_(sh, idx, row, equipe){
+  try{
+    var ticketId   = idx.ticket>=0  ? sh.getRange(row, idx.ticket+1).getValue()  : '';
+    if(!ticketId) return;
+    var statusLocal= idx.status>=0  ? sh.getRange(row, idx.status+1).getValue()  : '';
+    var assunto    = idx.assunto>=0 ? sh.getRange(row, idx.assunto+1).getValue() : '';
+    var cliente    = idx.cliente>=0 ? sh.getRange(row, idx.cliente+1).getValue() : '';
+    var jira       = idx.jira>=0    ? sh.getRange(row, idx.jira+1).getValue()    : '';
+    var dataAdic   = idx.addedat>=0 ? sh.getRange(row, idx.addedat+1).getValue() : '';
+
+    var temEquipe   = !!(equipe && String(equipe).trim());
+    var equipeFinal = temEquipe ? String(equipe).trim() : 'N3 Fábrica';
+    var deveEscalar = (statusLocal === 'Pendente N3') || temEquipe;
+
+    var statusParaFabrica = (statusLocal === 'Pendente N3') ? 'Pendente' : statusLocal;
+    var dataApenasDia = (dataAdic instanceof Date)
+      ? Utilities.formatDate(dataAdic, Session.getScriptTimeZone(), 'dd/MM/yyyy') : dataAdic;
+
+    var jiraRT = kbJiraRT_(jira);
+
+    var fab = SpreadsheetApp.openById(FABRICA_ID).getSheetByName("Apoios");
+    var a = kbApoiosIdx_(fab);
+    if(a.ticket < 0) return;
+
+    function setA(field, r, val){ if(a[field]>=0 && val!==undefined && val!=='') fab.getRange(r, a[field]+1).setValue(val); }
+    function setBlank(field, r, val){ if(a[field]>=0) fab.getRange(r, a[field]+1).setValue(val); }
+    function setJira(r){ if(a.jira>=0){ if(jiraRT) fab.getRange(r, a.jira+1).setRichTextValue(jiraRT); else fab.getRange(r, a.jira+1).setValue(jira); } }
+
+    var alvo = kbDigits_(ticketId);
+    var ult = fab.getLastRow();
+    var encontrado = false;
+
+    if(ult >= 2){
+      var dados = fab.getRange(2, a.ticket+1, ult-1, 1).getValues();
+      for(var i=0;i<dados.length;i++){
+        if(kbDigits_(dados[i][0]) === alvo){
+          var rr = i+2;
+          if(temEquipe) setA('equipe', rr, equipeFinal);
+          setA('descricao', rr, assunto);
+          setBlank('resp', rr, sh.getName());   // Responsável = nome da aba (analista)
+          setBlank('cliente', rr, cliente);
+          setA('data', rr, dataApenasDia);
+          setJira(rr);
+          setA('status', rr, statusParaFabrica);
+          encontrado = true;
+          break;
+        }
+      }
+    }
+    if(!encontrado && deveEscalar){
+      var nova = fab.getLastRow() + 1;
+      setA('equipe', nova, equipeFinal);
+      setA('ticket', nova, ticketId);
+      setA('descricao', nova, assunto);
+      setBlank('resp', nova, sh.getName());   // Responsável = nome da aba (analista)
+      setBlank('cliente', nova, cliente);
+      setA('data', nova, dataApenasDia);
+      setJira(nova);
+      setA('status', nova, statusParaFabrica);
+    }
+  }catch(err){ /* Fábrica indisponível: ignora */ }
+}
+
+function kbDigits_(v){ var m = String(v==null?'':v).match(/(\d+)/); return m ? m[1] : String(v||'').trim(); }
+
+function kbEquipes_(){
+  try{
+    var fab = SpreadsheetApp.openById(FABRICA_ID).getSheetByName("Apoios");
+    var a = kbApoiosIdx_(fab);
+    var ecol = (a.equipe>=0 ? a.equipe : 0) + 1;
+    for(var row=2; row<=Math.min(fab.getLastRow(),30); row++){
+      var rule = fab.getRange(row, ecol).getDataValidation();
+      if(!rule) continue;
+      var tipo=rule.getCriteriaType(), args=rule.getCriteriaValues();
+      if(tipo===SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) return (args[0]||[]).map(function(v){return String(v).trim();}).filter(String);
+      if(tipo===SpreadsheetApp.DataValidationCriteria.VALUE_IN_RANGE) return args[0].getValues().map(function(r){return String(r[0]).trim();}).filter(String);
+    }
+    var ult=fab.getLastRow(); if(ult<2) return [];
+    var vals=fab.getRange(2, ecol, ult-1, 1).getValues(), seen={}, out=[];
+    for(var i=0;i<vals.length;i++){ var v=String(vals[i][0]||'').trim(); if(v && !seen[v]){ seen[v]=1; out.push(v); } }
+    return out;
+  }catch(e){ return []; }
+}
+
+function kbJiraRT_(jiraLike){
+  var m = String(jiraLike==null?'':jiraLike).match(/([A-Za-z]+-\d+)/);
+  if(!m) return null;
+  var key = m[1].toUpperCase();
+  var preto = SpreadsheetApp.newTextStyle().setForegroundColor('#000000').build();
+  return SpreadsheetApp.newRichTextValue()
+    .setText(key).setLinkUrl('https://cisspoder.atlassian.net/browse/' + key).setTextStyle(preto).build();
+}
+
+function kbStatuses_(sh){
+  var idx = kbHeaderIndex_(sh);
+  var col = idx.status>=0 ? idx.status+1 : 2;
+  var scanAte = Math.min(sh.getLastRow(), 60);
+  for(var row=2; row<=scanAte; row++){
+    var rule = sh.getRange(row, col).getDataValidation();
+    if(!rule) continue;
+    var tipo = rule.getCriteriaType(), args = rule.getCriteriaValues();
+    if(tipo === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) return (args[0]||[]).map(function(v){return String(v).trim();}).filter(String);
+    if(tipo === SpreadsheetApp.DataValidationCriteria.VALUE_IN_RANGE) return args[0].getValues().map(function(r){return String(r[0]).trim();}).filter(String);
+  }
+  return [];
+}
+
+function kbDelete_(sh, q){
+  var idx = kbHeaderIndex_(sh);
+  if(idx.ticket < 0 && idx.assunto < 0) return {ok:false, error:'Coluna Ticket/Assunto não encontrada'};
+
+  var rawKey = String(q.key==null?'':q.key).trim();
+  var mR = rawKey.match(/^(?:R|row)(\d+)$/i);
+  if(mR){
+    var rn = parseInt(mR[1],10);
+    if(rn>=2 && rn<=sh.getLastRow()){ sh.deleteRow(rn); return {ok:true, deleted:'R'+rn, local:true, fabrica:false}; }
+  }
+
+  var ticketDigits = kbDigits_(q.ticket || (rawKey.match(/^\d+$/)?rawKey:''));
+  var deletedLocal = false, deletedFabrica = false;
+  var lastRow = sh.getLastRow();
+
+  if(ticketDigits && idx.ticket>=0 && lastRow>=2){
+    var colT = sh.getRange(2, idx.ticket+1, lastRow-1, 1).getValues();
+    for(var i=0;i<colT.length;i++){
+      if(kbDigits_(colT[i][0]) === ticketDigits){ sh.deleteRow(i+2); deletedLocal = true; break; }
+    }
+  } else if(!ticketDigits && lastRow>=2 && idx.assunto>=0){
+    var assTarget = String(q.assunto || q.title || rawKey).trim().toLowerCase();
+    if(assTarget){
+      var colA = sh.getRange(2, idx.assunto+1, lastRow-1, 1).getValues();
+      for(var k=0;k<colA.length;k++){
+        if(String(colA[k][0]||'').trim().toLowerCase() === assTarget){ sh.deleteRow(k+2); deletedLocal = true; break; }
+      }
+    }
+  }
+
+  if(ticketDigits){
+    try{
+      var fab = SpreadsheetApp.openById(FABRICA_ID).getSheetByName("Apoios");
+      var a = kbApoiosIdx_(fab);
+      var ult = fab.getLastRow();
+      if(a.ticket >= 0 && ult >= 2){
+        var dados = fab.getRange(1, a.ticket+1, ult, 1).getValues();
+        for(var j=0;j<dados.length;j++){
+          if(kbDigits_(dados[j][0]) === ticketDigits){ fab.deleteRow(j+1); deletedFabrica = true; break; }
+        }
+      }
+    }catch(err){ /* Fábrica indisponível */ }
+  }
+
+  return {ok:true, deleted:ticketDigits||rawKey||'assunto', local:deletedLocal, fabrica:deletedFabrica};
+}

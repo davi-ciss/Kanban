@@ -1266,7 +1266,7 @@ function delCard(){
   col.cards = col.cards.filter(c=>c.id!==card.id); save(); render(); closeCard();
   logAction('delete', card.id, card.title, `Excluída de ${col.name}`);
   if(synced){
-    jsonp({action:'delete', key:card.rowKey||card.ticket, ticket:card.ticket})
+    jsonp({action:'delete', key:card.rowKey||card.ticket||'', ticket:card.ticket||'', assunto:card.title||''})
       .then(r=>{
         const ok=r&&r.ok;
         toast(ok ? (r.deleted&&(r.local||r.fabrica) ? '✓ Excluído da planilha' : 'Card excluído (linha não encontrada na planilha)') : '⚠ '+((r&&r.error)||'Erro ao excluir na planilha'));
@@ -1445,9 +1445,9 @@ function colForStatus(name){
   if(!col){ col={id:uid(), name:st, color:COLORS[state.cols.length%COLORS.length], cards:[]}; state.cols.push(col); }
   return col;
 }
-function findCard(key, tnum){
+function findCard(key, tnum, title){
   for(const c of state.cols){
-    const f = c.cards.find(k => (k.rowKey&&String(k.rowKey)===String(key)) || (tnum&&digitsOnly(k.ticket)===tnum));
+    const f = c.cards.find(k => (k.rowKey&&String(k.rowKey)===String(key)) || (tnum&&digitsOnly(k.ticket)===tnum) || (!tnum&&title&&k.title&&k.title.trim().toLowerCase()===String(title).trim().toLowerCase()));
     if(f) return {card:f, col:c};
   }
   return null;
@@ -1475,7 +1475,7 @@ async function pullSheet(){
       const col = colForStatus(row.status);          // status (col B) vira a coluna do Kanban
       const key = String(row.key||row.ticket||'');
       const tnum = digitsOnly(row.ticket);
-      const hit = findCard(key, tnum);
+      const hit = findCard(key, tnum, row.assunto);
       if(hit){
         const c = hit.card;
         c.title=row.assunto||c.title; c.cli=row.cliente||c.cli; c.desc=row.obs||c.desc;
