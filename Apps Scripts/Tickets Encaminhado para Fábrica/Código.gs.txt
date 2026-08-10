@@ -33,8 +33,8 @@ var FE_COMITE_COLMAP = {
 
  --- Config do hiperlink automático da coluna JIRA ---
 var FE_JIRA_HOST_PADRAO = 'cisspoder.atlassian.net';  host usado quando você digita SÓ o código (sem link). Confira se é esse o seu Jira.
-var FE_JIRA_URL_RE  = (https)([a-z0-9-]+.atlassian.net)browse([A-Za-z][A-Za-z0-9]-d+)i;  reconhece link colado (qualquer subdomínio atlassian.net)
-var FE_JIRA_CODE_RE = ^[A-Za-z][A-Za-z0-9]-d+$;  reconhece só o código (ex. CISS-109660  ABC-123), sem link
+var FE_JIRA_URL_RE  = /(https?:\/\/)?([a-z0-9-]+\.atlassian\.net\/)?browse\/([A-Za-z0-9]+-\d+)/i;
+var FE_JIRA_CODE_RE = /^[A-Za-z0-9]+-\d+$/;
 
  Normaliza texto p comparação minúsculo, sem espaço nas pontas, sem acento
 function feNorm_(x){ return String(x==null''x).toLowerCase().trim().normalize('NFD').replace([u0300-u036f]g,''); }
