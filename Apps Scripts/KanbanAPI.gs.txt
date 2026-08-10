@@ -168,7 +168,7 @@ function kbUpsert_(sh, q){
     var curJ = String(sh.getRange(targetRow, idx.jira+1).getValue()).trim();
     var jiraKey = String(q.jira).trim();
     if(curJ !== jiraKey){
-      var mj = jiraKey.match(/([A-Za-z]+-\d+)/);
+      var mj = jiraKey.match(/([A-Za-z0-9]+-\d+)/);
       if(mj){
         var urlJ = 'https://cisspoder.atlassian.net/browse/' + mj[1];
         var preto = SpreadsheetApp.newTextStyle().setForegroundColor('#000000').build();
@@ -276,7 +276,7 @@ function kbEquipes_(){
 }
 
 function kbJiraRT_(jiraLike){
-  var m = String(jiraLike==null?'':jiraLike).match(/([A-Za-z]+-\d+)/);
+  var m = String(jiraLike==null?'':jiraLike).match(/([A-Za-z0-9]+-\d+)/);
   if(!m) return null;
   var key = m[1].toUpperCase();
   var preto = SpreadsheetApp.newTextStyle().setForegroundColor('#000000').build();
