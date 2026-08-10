@@ -1,0 +1,211 @@
+ =========================================================================
+ HIPERLINK JIRA (qualquer aba) + SINCRONIZAÇÃO FÁBRICA (Apoios) - COMITÊ
+
+ - onEdit (SIMPLES) roda sozinho, sem instalar nada. Ao digitar ABC-123
+   ou colar o link do browse na coluna JIRA de QUALQUER aba, vira ABC-123
+   com hiperlink azul. Não mexe em linhas antigas (só na célula editada).
+ - processarEdicaoFabrica (INSTALÁVEL) sincroniza a linha da Apoios para a
+   aba do Responsável no Comitê (precisa de gatilho instalável por causa do
+   openById). Não faz mais formatação de link — quem faz é o onEdit.
+ =========================================================================
+
+var FE_COMITE_ID = 1C3Vtim_zJlHnB2suZAd9TzSvFdaLVFTEqD5_57voX_U;  ID da planilha do Comitê (arquivo separado)
+
+ Mapa de cabeçalhos da aba Apoios (Fábrica) — cada campo aceita variações de nome de coluna
+var FE_APOIOS_COLMAP = {
+  equipe    ['equipe fabrica','equipe fábrica','equipe'],
+  ticket    ['ticket','chamado'],            nº do chamado Zendesk
+  descricao ['descricao','descrição','assunto','titulo','título'],
+  resp      ['responsavel','responsável'],   define para qual aba do Comitê a linha sincroniza
+  cliente   ['cliente'],
+  data      ['data'],
+  jira      ['jira'],
+  status    ['status']
+};
+ Mapa de cabeçalhos da aba do analista, dentro do Comitê
+var FE_COMITE_COLMAP = {
+  ticket  ['ticket','chamado'],
+  status  ['status'],
+  assunto ['assunto','titulo','título','descricao','descrição'],
+  cliente ['cliente'],
+  jira    ['jira']
+};
+
+ --- Config do hiperlink automático da coluna JIRA ---
+var FE_JIRA_HOST_PADRAO = 'cisspoder.atlassian.net';  host usado quando você digita SÓ o código (sem link). Confira se é esse o seu Jira.
+var FE_JIRA_URL_RE  = (https)([a-z0-9-]+.atlassian.net)browse([A-Za-z][A-Za-z0-9]-d+)i;  reconhece link colado (qualquer subdomínio atlassian.net)
+var FE_JIRA_CODE_RE = ^[A-Za-z][A-Za-z0-9]-d+$;  reconhece só o código (ex. CISS-109660  ABC-123), sem link
+
+ Normaliza texto p comparação minúsculo, sem espaço nas pontas, sem acento
+function feNorm_(x){ return String(x==null''x).toLowerCase().trim().normalize('NFD').replace([u0300-u036f]g,''); }
+
+ Extrai só os dígitos de um valor (ex. nº de ticket vindo de link ou texto misto)
+function feDigits_(v){ var m=String(v==null''v).match((d+)); return mm[1]String(v'').trim(); }
+
+ Lê a linha 1 (cabeçalho) da aba sh e devolve o índice (0-based) de cada campo do colmap
+function feIdx_(sh, colmap){
+  var lc=Math.max(1, sh.getLastColumn());
+  var head=sh.getRange(1,1,1,lc).getValues()[0].map(feNorm_);  cabeçalho inteiro já normalizado
+  var idx={};
+  for(var f in colmap){ idx[f]=-1; var ns=colmap[f];
+    for(var i=0;ihead.length;i++){ if(ns.indexOf(head[i])!==-1){ idx[f]=i; break; } } }
+  return idx;
+}
+
+ Converte um range (1 célula ou bloco colado) já restrito à coluna JIRA em hiperlinks
+ (mostra só o código, cor azul padrão). Chamável também pela integração (ver nota no fim).
+function processarLinkJira_(range){
+  var vals = range.getValues();           valores atuais do range (matriz linhas x colunas)
+  var sheet = range.getSheet();
+  var row0 = range.getRow(), col0 = range.getColumn();  canto superior-esquerdo (1-based)
+
+  for(var i=0;ivals.length;i++){          percorre cada linha do range
+    for(var j=0;jvals[i].length;j++){     percorre cada coluna do range (normalmente só 1)
+      var v = vals[i][j];
+      if(typeof v !== 'string') continue;  ignora númerodatavazio
+      v = v.trim();
+      if(!v) continue;
+
+      var ticket=null, url=null;
+      var m = v.match(FE_JIRA_URL_RE);     1ª tentativa célula tem um link colado
+      if(m){
+        ticket = m[2].toUpperCase();                código extraído do link
+        url = 'https' + m[1] + 'browse' + ticket;  usa o host do próprio link
+      } else if(FE_JIRA_CODE_RE.test(v)){  2ª tentativa só o código, sem link
+        ticket = v.toUpperCase();
+        url = 'https' + FE_JIRA_HOST_PADRAO + 'browse' + ticket;  usa host padrão
+      } else {
+        continue;  não é link nem código reconhecível — não mexe na célula
+      }
+
+       Sem setTextStyle - mantém a corsublinhado azul padrão de hiperlink do Sheets
+      sheet.getRange(row0+i, col0+j).setRichTextValue(
+        SpreadsheetApp.newRichTextValue().setText(ticket).setLinkUrl(url).build()
+      );
+    }
+  }
+}
+
+ =========================================================================
+ GATILHO SIMPLES — roda AUTOMÁTICO em edição manual (digitarcolar), sem
+ precisar instalar nada. Só formata link na aba ativa (não abre outro arquivo).
+ OBS. só pode existir UM onEdit no projeto. Se já tiver outro, junte aqui dentro.
+ =========================================================================
+function onEdit(e){
+  if(!e  !e.range) return;
+  var s = e.range.getSheet();
+  if(e.range.getRow()=1) return;  edição no cabeçalho ignora
+
+   (1) Coluna JIRA de QUALQUER aba - hiperlink ABC-123
+  var jiraCol = feIdx_(s, {jira['jira']}).jira;  0-based; -1 se a aba não tem coluna Jira
+  if(jiraCol=0){
+    var cj = jiraCol+1;                                         1-based
+    var ini = e.range.getColumn(), fim = ini + e.range.getNumColumns() - 1;  faixa de colunas editada
+    if(cj=ini && cj=fim){                                     a edição tocou a coluna Jira
+      processarLinkJira_(s.getRange(e.range.getRow(), cj, e.range.getNumRows(), 1));  restringe à coluna Jira
+    }
+  }
+
+   (2) Coluna TICKET (Zendesk) só na aba Apoios - hiperlink com o número
+  if(s.getName()===Apoios){
+    var a = feIdx_(s, FE_APOIOS_COLMAP);
+    if(a.ticket=0){
+      var ct = a.ticket+1;
+      var ini2 = e.range.getColumn(), fim2 = ini2 + e.range.getNumColumns() - 1;
+      if(ct=ini2 && ct=fim2){
+        var rngT = s.getRange(e.range.getRow(), ct, e.range.getNumRows(), 1);
+        var valsT = rngT.getValues();
+        for(var i=0;ivalsT.length;i++){
+          var vt = valsT[i][0];
+          if(typeof vt !== 'string') continue;
+          var mz = vt.match(cisssa.zendesk.comagenttickets(d+));  link de ticket do Zendesk
+          if(mz) s.getRange(e.range.getRow()+i, ct).setRichTextValue(
+            SpreadsheetApp.newRichTextValue().setText(mz[1]).setLinkUrl(vt.trim()).build());
+        }
+      }
+    }
+  }
+}
+
+ =========================================================================
+ GATILHO INSTALÁVEL — sincroniza Apoios - Comitê. INSTALE apontando para
+ esta função (passo a passo abaixo). Não formata link (isso é do onEdit).
+ =========================================================================
+function processarEdicaoFabrica(e){
+  if(!e  !e.source) return;               sem contexto de edição real
+  var s = e.source.getActiveSheet();
+  if(s.getName()!==Apoios  e.range.getRow()=1) return;  só interessa a aba Apoios
+  var a = feIdx_(s, FE_APOIOS_COLMAP);
+  if(a.ticket  0) return;                  sem coluna Ticket, não continua
+
+  var r = e.range, linha = r.getRow(), col = r.getColumn()-1;  col 0-based (p comparar com a.xxx)
+
+   --- Apagar o Ticket (Delete na coluna Ticket) remove a linha no Comitê ---
+  if(col===a.ticket && r.getValue()===){
+    var respDel = a.resp=0  s.getRange(linha, a.resp+1).getValue()  '';  responsável da linha (define a aba)
+    if(!respDel  !e.oldValue) return;     sem responsável ou sem valor anterior, nada a remover
+    var tk = feDigits_(e.oldValue);         nº do ticket que estava na célula antes de apagar
+    try{
+      var ca = SpreadsheetApp.openById(FE_COMITE_ID).getSheetByName(String(respDel).trim());
+      if(ca){
+        var ci0 = feIdx_(ca, FE_COMITE_COLMAP);
+        if(ci0.ticket=0){
+          var ul0 = ca.getLastRow();
+          if(ul0=2){
+            var d=ca.getRange(2, ci0.ticket+1, ul0-1, 1).getValues();
+            for(var i=0;id.length;i++)
+              if(feDigits_(d[i][0])===tk){ ca.deleteRow(i+2); break; }  acha a linha e apaga
+          }
+        }
+      }
+    }catch(err){ console.error(err); }
+    return;  exclusão tratada
+  }
+
+   --- Sincroniza ao mudar Descrição, Cliente, Jira ou Status ---
+  var gatilho = (col===a.descricao)(col===a.cliente)(col===a.jira)(col===a.status);
+  if(!gatilho) return;
+
+  try{
+    var ticketId = a.ticket=0  s.getRange(linha, a.ticket+1).getValue()  '';
+    if(!ticketId) return;                   sem ticket, não identifica a linha no Comitê
+    var responsavel = a.resp=0  String(s.getRange(linha, a.resp+1).getValue()'').trim()  '';
+    if(!responsavel) return;                sem responsável, não sabe pra qual aba mandar
+    var descricao = a.descricao=0 s.getRange(linha, a.descricao+1).getValue()'';
+    var cliente   = a.cliente=0   s.getRange(linha, a.cliente+1).getValue()'';
+    var jira      = a.jira=0      s.getRange(linha, a.jira+1).getValue()'';
+    var status    = a.status=0    s.getRange(linha, a.status+1).getValue()'';
+
+    var ca = SpreadsheetApp.openById(FE_COMITE_ID).getSheetByName(responsavel);  aba = nome do Responsável
+    if(!ca) return;                         não existe aba com esse nome no Comitê
+    var ci = feIdx_(ca, FE_COMITE_COLMAP);
+    if(ci.ticket  0) return;
+
+    function setC(field, row, val){ if(ci[field]=0 && val!=='' && val!==undefined) ca.getRange(row, ci[field]+1).setValue(val); }  não sobrescreve com vazio
+    function setCB(field, row, val){ if(ci[field]=0) ca.getRange(row, ci[field]+1).setValue(val); }  grava mesmo vazio (na criação)
+
+    var alvo = feDigits_(ticketId);
+    var ul = ca.getLastRow(), achou=false;
+    if(ul=2){
+      var ids = ca.getRange(2, ci.ticket+1, ul-1, 1).getValues();
+      for(var j=0;jids.length;j++){
+        if(feDigits_(ids[j][0])===alvo){     achou a linha do ticket - atualiza
+          var rr=j+2;
+          setC('status', rr, status);
+          setC('assunto', rr, descricao);
+          setCB('cliente', rr, cliente);
+          setC('jira', rr, jira);
+          achou=true; break;
+        }
+      }
+    }
+    if(!achou){                              ticket novo - cria linha
+      var nl = ca.getLastRow()+1;
+      setCB('ticket', nl, ticketId);
+      setCB('status', nl, status);
+      setCB('assunto', nl, descricao);
+      setCB('cliente', nl, cliente);
+      setCB('jira', nl, jira);
+    }
+  }catch(err){ console.error(err); }
+}
