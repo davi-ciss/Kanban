@@ -64,14 +64,13 @@ function processarEdicaoComite(e){
   if(col===idx.ticket || col===idx.jira){
     var value = r.getValue();
     if(typeof value === 'string'){
-      var preto = SpreadsheetApp.newTextStyle().setForegroundColor("#000000").build();
       if(col===idx.ticket){
         var mZ = value.match(/cisssa\.zendesk\.com\/agent\/tickets\/(\d+)/);
         if(mZ){ r.setRichTextValue(SpreadsheetApp.newRichTextValue().setText(mZ[1]).setLinkUrl(value.trim()).build()); r.setFontColor(null); }
       }
       if(col===idx.jira){
         var mJ = value.match(/([A-Za-z0-9]+-\d+)/);
-        if(mJ) r.setRichTextValue(SpreadsheetApp.newRichTextValue().setText(mJ[1]).setLinkUrl(value.trim()).setTextStyle(preto).build());
+        if(mJ) r.setRichTextValue(SpreadsheetApp.newRichTextValue().setText(mJ[1]).setLinkUrl('https://cisspoder.atlassian.net/browse/'+mJ[1]).build());
       }
     }
   }

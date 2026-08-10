@@ -142,11 +142,10 @@ function kbUpsert_(sh, q){
 
   function set(field, val){ if(idx[field]>=0 && val!==undefined && val!=='') sh.getRange(targetRow, idx[field]+1).setValue(val); }
 
-  // Ticket -> link Zendesk em PRETO
+  // Ticket -> link Zendesk
   if(ticketDigits && idx.ticket>=0){
     var urlZ = 'https://cisssa.zendesk.com/agent/tickets/' + ticketDigits;
-    var pretoZ = SpreadsheetApp.newTextStyle().setForegroundColor('#000000').build();
-    var rtZ = SpreadsheetApp.newRichTextValue().setText(ticketDigits).setLinkUrl(urlZ).setTextStyle(pretoZ).build();
+    var rtZ = SpreadsheetApp.newRichTextValue().setText(ticketDigits).setLinkUrl(urlZ).build();
     sh.getRange(targetRow, idx.ticket+1).setRichTextValue(rtZ);
   }
 
@@ -163,7 +162,7 @@ function kbUpsert_(sh, q){
     else sh.getRange(targetRow, idx.alt+1).setValue(new Date());
   }
 
-  // Jira -> link Atlassian preto, só reescreve se mudou
+  // Jira -> link Atlassian, só reescreve se mudou
   if(idx.jira>=0 && q.jira!==undefined && String(q.jira)!==''){
     var curJ = String(sh.getRange(targetRow, idx.jira+1).getValue()).trim();
     var jiraKey = String(q.jira).trim();
@@ -171,8 +170,7 @@ function kbUpsert_(sh, q){
       var mj = jiraKey.match(/([A-Za-z0-9]+-\d+)/);
       if(mj){
         var urlJ = 'https://cisspoder.atlassian.net/browse/' + mj[1];
-        var preto = SpreadsheetApp.newTextStyle().setForegroundColor('#000000').build();
-        var rtJ = SpreadsheetApp.newRichTextValue().setText(mj[1]).setLinkUrl(urlJ).setTextStyle(preto).build();
+        var rtJ = SpreadsheetApp.newRichTextValue().setText(mj[1]).setLinkUrl(urlJ).build();
         sh.getRange(targetRow, idx.jira+1).setRichTextValue(rtJ);
       } else {
         sh.getRange(targetRow, idx.jira+1).setValue(jiraKey);
@@ -279,9 +277,8 @@ function kbJiraRT_(jiraLike){
   var m = String(jiraLike==null?'':jiraLike).match(/([A-Za-z0-9]+-\d+)/);
   if(!m) return null;
   var key = m[1].toUpperCase();
-  var preto = SpreadsheetApp.newTextStyle().setForegroundColor('#000000').build();
   return SpreadsheetApp.newRichTextValue()
-    .setText(key).setLinkUrl('https://cisspoder.atlassian.net/browse/' + key).setTextStyle(preto).build();
+    .setText(key).setLinkUrl('https://cisspoder.atlassian.net/browse/' + key).build();
 }
 
 function kbStatuses_(sh){
