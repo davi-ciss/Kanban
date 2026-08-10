@@ -72,3 +72,7 @@ Se a aba usar outros nomes, ajuste `COLMAP` no topo do `Code.gs`.
 - A comunicação usa **JSONP** (tag `<script>`), o que evita problemas de CORS rodando do `file://`. Por isso o endpoint precisa ser "Qualquer pessoa".
 - Payload via URL: ok para cards normais; observações gigantes (>1–2 mil caracteres) podem falhar — encurte se necessário.
 - Sem internet, vínculo fica indisponível, mas o board funciona normal.
+
+## Regras de Desenvolvimento e Manutenção
+1. **Incremento da Versão**: Toda alteração no projeto exige o bump da constante `APP_VERSION` no `Kanban.html` e a atualização do nome de cache do Service Worker em `sw.js`.
+2. **Validação Cruzada de Scripts**: Qualquer alteração de regex, regras de formatação, hiperlinks ou tratamento de chaves no `Kanban.html` deve obrigatoriamente ser aplicada e validada em **todos os scripts da pasta `Apps Scripts/`** (`KanbanAPI.gs.txt`, `Scripts.gs.txt`, `Código.gs.txt`, etc.). Ver detalhes em [`RULES.md`](file:///c:/Users/davi.meurer/Documents/devs/Kanban%20v1/RULES.md).
