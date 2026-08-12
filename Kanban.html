@@ -455,6 +455,8 @@
   .sh-retry{flex:none; padding:5px 10px; border-radius:7px; font-size:11px; font-weight:700;
     color:var(--accent); border:1px solid var(--accent); background:transparent; transition:.15s; margin-top:-1px}
   .sh-retry:hover{background:var(--accent); color:#fff}
+  .sh-retry.sh-ignore{color:var(--red); border-color:var(--red); padding:5px 7px}
+  .sh-retry.sh-ignore:hover{background:var(--red); color:#fff}
   .sh-foot{padding:8px 12px; border-top:1px solid var(--line); display:flex; justify-content:flex-end; gap:8px}
   .sh-foot button{padding:6px 12px; border-radius:7px; font-size:12px; font-weight:600; color:var(--txt-dim)}
   .sh-foot button:hover{background:var(--col); color:var(--txt)}
@@ -799,7 +801,7 @@ const $ = s => document.querySelector(s);
 const uid = () => 'c'+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
 // Versão: v<base>.<nº de commits em main no GitHub>. Bump manual do nº a cada commit novo
 // (git log --oneline | wc -l). Sem build step aqui, então não dá pra calcular sozinho em runtime.
-const APP_VERSION = 'v1.0.43';
+const APP_VERSION = 'v1.0.44';
 const KEY = 'kanban_ciss_v1';
 const COLORS = ['#5b8cff','#3fb950','#d6a533','#a371f7','#39c5cf','#e5534b','#ec6cb9'];
 const NO_STATUS = 'Sem status';   // coluna sintética = status vazio na planilha
@@ -980,7 +982,7 @@ function cardEl(card, colId){
   if(pr.l)        chips.push(`<span class="chip pr-flag" style="color:${pr.c}">${pr.l}</span>`);
   if(card.linked){
     chips.push(card.syncError
-      ? `<span class="chip sync-err" title="${esc(card.syncError)} — reprocessando automaticamente…">⚠ Erro de sync</span>`
+      ? `<span class="chip sync-err" title="${esc(card.syncError)} — ${card.syncErrorIgnored?'reprocessamento ignorado':((card.syncRetryCount||0)>=MAX_AUTO_RETRIES?'reprocessamento automático pausado (limite atingido)':'reprocessando automaticamente…')}">⚠ Erro de sync</span>`
       : `<span class="chip linked">⟳ Sincronizado</span>`);
   }
   
@@ -1179,7 +1181,19 @@ function renderLinkBox(card){
       </div>
       <button class="switch ${on?'on':''}" id="syncSw" role="switch" aria-checked="${on}" ${state.endpoint?'':'disabled'}><span></span></button>
     </div>
-    ${on && state.endpoint ? `<button class="btn green" id="pushNow" style="margin-top:10px">↻ Atualizar agora no Sheets</button>` : ``}`;
+    ${on && state.endpoint ? `<button class="btn green" id="pushNow" style="margin-top:10px">↻ Atualizar agora no Sheets</button>` : ``}
+    ${on && state.endpoint && card.syncError ? `
+    <div class="sync-errbox ${card.syncErrorIgnored?'ignored':''}" style="margin-top:10px; padding:10px; border:1px solid #e5534b55; border-radius:8px; background:#e5534b0d">
+      <div style="font-size:12px; font-weight:700; color:var(--red)">⚠ Erro de sincronização</div>
+      <div style="font-size:11.5px; color:var(--txt-mut); margin:4px 0 8px; word-break:break-word">${esc(card.syncError)}</div>
+      <div style="font-size:11px; color:var(--txt-dim); margin-bottom:8px">${
+        card.syncErrorIgnored ? 'Reprocessamento automático <b>ignorado</b> — este card não tenta mais sozinho.'
+        : (card.syncRetryCount||0)>=MAX_AUTO_RETRIES ? 'Reprocessamento automático <b>pausado</b> (limite de tentativas atingido).'
+        : 'Reprocessando automaticamente… (tentativa ' + ((card.syncRetryCount||0)+1) + ' de ' + MAX_AUTO_RETRIES + ')'}</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap">
+        <button class="btn ghost" id="syncIgnoreBtn" style="padding:6px 10px; font-size:11.5px">${card.syncErrorIgnored?'↻ Reativar reprocessamento':'✕ Ignorar erro (nunca mais reprocessar)'}</button>
+      </div>
+    </div>` : ``}`;
   const sw = $('#syncSw');
   if(sw) sw.onclick = ()=>{
     if(!state.endpoint){ toast('⚙ Configure o endpoint do Sheets primeiro'); return; }
@@ -1187,6 +1201,18 @@ function renderLinkBox(card){
     else { card.linked=true; saveCard(true); }   // liga e já envia
   };
   const pn = $('#pushNow'); if(pn) pn.onclick = ()=> saveCard(true);
+  const ig = $('#syncIgnoreBtn');
+  if(ig) ig.onclick = ()=>{
+    if(card.syncErrorIgnored){
+      card.syncErrorIgnored=false; card.syncRetryCount=0; save(); renderLinkBox(card); render();
+      toast('Reprocessamento automático reativado'); armAutoRetry(card, 0);
+    } else {
+      card.syncErrorIgnored=true; card.syncRetryCount=0;
+      clearTimeout(autoRetryTimers[card.id]); delete autoRetryTimers[card.id];
+      save(); renderLinkBox(card); render();
+      toast('Erro ignorado — este card nunca mais reprocessa sozinho (só manual)');
+    }
+  };
 }
 
 // ---------- LINK DO CLIENTE ----------
@@ -1262,6 +1288,7 @@ function delCard(){
     ? `Excluir "${card.title}"?\n\n⚠ Este card está sincronizado — a linha do ticket ${card.ticket||'(sem nº)'} também será EXCLUÍDA da planilha (aba ${state.tab} e Fábrica). Não dá pra desfazer.`
     : `Excluir "${card.title}"?\n\nEsta ação não pode ser desfeita.`;
   if(!confirm(aviso)) return;
+  clearTimeout(autoRetryTimers[card.id]); delete autoRetryTimers[card.id];   // para o reprocessamento automático do card excluído
   const col = state.cols.find(c=>c.id===editing.colId);
   col.cards = col.cards.filter(c=>c.id!==card.id); save(); render(); closeCard();
   logAction('delete', card.id, card.title, `Excluída de ${col.name}`);
@@ -1388,7 +1415,7 @@ async function pushCard(card, status, silent){
     const r=await jsonp({action:'upsert', key:card.rowKey||card.ticket||'',
       ticket:card.ticket||'', assunto:card.title||'', cliente:card.cli||'',
       status:out, obs:card.desc||'', jira:card.jira||'', atrib:card.atrib||'', equipe:card.equipe||''});
-    if(r&&r.ok){ card.linked=true; card.rowKey=r.key||card.rowKey||card.ticket||''; card.syncError=null; save();
+    if(r&&r.ok){ card.linked=true; card.rowKey=r.key||card.rowKey||card.ticket||''; card.syncError=null; card.syncRetryCount=0; card.syncErrorIgnored=false; save();
       toast('✓ Enviado ao Sheets'); logSync({cardId:card.id,title:card.title,ticket:card.ticket,action:'upsert',ok:true}); render(); return true;
     } else {
       const em=(r&&r.error)||'Erro ao enviar'; card.syncError=em; save();
@@ -1404,32 +1431,51 @@ async function pushCard(card, status, silent){
 
 // ---------- RETRY AUTOMÁTICO DE SINCRONIZAÇÃO ----------
 // Se um push falha, o próprio sistema reprocessa sozinho: 3 tentativas rápidas
-// com backoff (10s/30s/90s) e, se ainda assim não resolver, uma varredura
-// periódica (a cada 3min) continua tentando enquanto o card tiver syncError.
+// com backoff (10s/30s/90s) e, enquanto o card tiver syncError, uma varredura
+// periódica (a cada 3min) continua tentando — mas com TETO: após MAX_AUTO_RETRIES
+// tentativas automáticas, o reprocessamento é pausado e só volta por ação manual
+// (botão ↻ no histórico ou "Atualizar agora no Sheets" no card).
+const MAX_AUTO_RETRIES = 6;           // teto de tentativas automáticas por card (rápidas + varredura)
 const SYNC_RETRY_DELAYS = [10000, 30000, 90000];
 let autoRetryTimers = {};
 function findColOfCard(id){ for(const c of state.cols){ if(c.cards.some(x=>x.id===id)) return c; } return null; }
+function autoRetryBlocked(card){
+  // true = não reprocessar mais automaticamente (ignorado pelo usuário ou teto atingido);
+  // reprocessamento manual continua disponível pelo histórico/card.
+  return !!(card.syncErrorIgnored || (card.syncRetryCount||0) >= MAX_AUTO_RETRIES);
+}
 function armAutoRetry(card, attempt){
-  if(attempt >= SYNC_RETRY_DELAYS.length) return;   // backoff rápido esgotado — a varredura periódica assume dali pra frente
+  if(autoRetryBlocked(card)) return;              // ignorado ou teto — só ação manual reprocessa
+  if(attempt >= SYNC_RETRY_DELAYS.length) return; // backoff rápido esgotado — a varredura periódica assume dali pra frente
   clearTimeout(autoRetryTimers[card.id]);
   autoRetryTimers[card.id] = setTimeout(async () => {
     delete autoRetryTimers[card.id];
     if(!state.endpoint) return;
     const c = findCardById(card.id); if(!c || !c.syncError) return;   // card excluído ou já resolvido nesse meio-tempo
     const col = findColOfCard(c.id); if(!col) return;
+    c.syncRetryCount = (c.syncRetryCount||0) + 1; save();
     const ok = await pushCard(c, col.name, true);   // busca a coluna ATUAL, não a de quando falhou
-    if(!ok) armAutoRetry(c, attempt+1);
+    if(ok){ c.syncRetryCount = 0; c.syncErrorIgnored = false; save(); }
+    else if(!autoRetryBlocked(c)) armAutoRetry(c, attempt+1);
   }, SYNC_RETRY_DELAYS[attempt]);
 }
 function pushCardAuto(card, status){
-  return pushCard(card, status).then(ok => { if(!ok) armAutoRetry(card, 0); return ok; });
+  return pushCard(card, status).then(ok => {
+    if(ok){ card.syncRetryCount = 0; card.syncErrorIgnored = false; save(); }
+    else if(!autoRetryBlocked(card)) armAutoRetry(card, 0);
+    return ok;
+  });
 }
 function checkSyncRetries(){
   if(!state.endpoint) return;
   state.cols.forEach(col => {
     col.cards.forEach(card => {
-      if(card.linked && card.syncError && !autoRetryTimers[card.id]){
-        pushCard(card, col.name, true).then(ok => { if(!ok) armAutoRetry(card, 0); });
+      if(card.linked && card.syncError && !autoRetryBlocked(card) && !autoRetryTimers[card.id]){
+        card.syncRetryCount = (card.syncRetryCount||0) + 1; save();
+        pushCard(card, col.name, true).then(ok => {
+          if(ok){ card.syncRetryCount = 0; card.syncErrorIgnored = false; save(); }
+          else if(!autoRetryBlocked(card)) armAutoRetry(card, 0);
+        });
       }
     });
   });
@@ -1718,10 +1764,11 @@ function renderSyncHist(){
       ?`<span class="sh-detail">${esc(aLbl[e.action]||e.action)} concluído</span>`
       :`<span class="sh-detail err-msg">⚠ ${esc(e.error||'Erro desconhecido')}</span>`;
     const retry=(!ok&&e.action==='upsert')?`<button class="sh-retry" data-retry="${e.id}" title="Reprocessar">↻</button>`:'';
+    const ignore=(!ok)?`<button class="sh-retry sh-ignore" data-ignore="${e.id}" title="Ignorar erro (nunca mais reprocessar)">✕</button>`:'';
     return `<div class="sh-item ${cls}" data-go="${e.cardId}">
       <span class="sh-ico">${ico}</span>
       <div class="sh-body"><div class="sh-title">${esc(e.title||'(sem título)')}${tk}</div>${detail}</div>
-      <span class="sh-time">${fmtWhen(e.time)}</span>${retry}</div>`;
+      <span class="sh-time">${fmtWhen(e.time)}</span>${ignore}${retry}</div>`;
   }).join('');
   list.querySelectorAll('.sh-item').forEach(el=>{
     el.onclick=ev=>{
@@ -1741,6 +1788,25 @@ function renderSyncHist(){
         }
       }, 50);
     };
+  });
+  list.querySelectorAll('[data-ignore]').forEach(b=>b.onclick=ev=>{
+    ev.stopPropagation();
+    const entry=state.syncLog.find(x=>x.id===b.dataset.ignore); if(!entry) return;
+    // marca o card para nunca mais reprocessar automaticamente (se ainda existir)
+    let card=null;
+    for(const col of state.cols){ const c=col.cards.find(x=>x.id===entry.cardId); if(c){card=c;break;} }
+    if(card){
+      card.syncErrorIgnored=true; card.syncRetryCount=0;
+      clearTimeout(autoRetryTimers[card.id]); delete autoRetryTimers[card.id];
+      save(); render();
+    }
+    // remove do histórico TODAS as entradas de erro (não resolvidas) do mesmo card
+    const before=state.syncLog.length;
+    state.syncLog = state.syncLog.filter(x => !(x.cardId===entry.cardId && !x.ok && !x.resolved));
+    save(); renderSyncHist(); updateSyncBadge();
+    toast(card
+      ? (before===state.syncLog.length ? 'Erro ignorado — reprocessamento desligado neste card' : 'Erro ignorado e removido do histórico')
+      : 'Registro de erro removido do histórico (card excluído)');
   });
   list.querySelectorAll('[data-retry]').forEach(b=>b.onclick=async ev=>{
     ev.stopPropagation();
