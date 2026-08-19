@@ -151,6 +151,21 @@
   .chip.linked{color:var(--green)}
   .chip.sync-err{color:var(--red); background:#e5534b1a; cursor:help}
   
+  /* INACTIVITY ALERTS */
+  .card.inactive-alert {
+    border: 1.5px solid var(--red) !important;
+    box-shadow: 0 0 8px rgba(229, 83, 75, 0.35);
+  }
+  .card.inactive-alert .bar {
+    background: var(--red) !important;
+  }
+  .chip.alert {
+    color: var(--red);
+    background: #e5534b1c;
+    border: 1px solid #e5534b33;
+    font-weight: 700;
+  }
+  
   /* EDITOR CSS */
   .ed-btn{background:transparent; border:1px solid transparent; border-radius:4px; color:var(--txt); width:28px; height:28px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:14px; font-family:inherit; transition:.15s}
   .ed-btn:hover{background:var(--col); border-color:var(--line)}
@@ -691,6 +706,25 @@
           <p class="ab-next" id="abNext"></p>
         </div>
         <hr style="border:none;border-top:1px solid var(--line);margin:4px 0">
+        <div class="field">
+          <label>Alertas de Inatividade por Status / Coluna</label>
+          <p class="hint" style="margin:4px 0 10px">Destaca em <b>vermelho/atenção</b> tarefas paradas há mais de X dias em colunas específicas (ex: <i>Aguardando Cliente</i>).</p>
+          <div id="alertsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--bg);padding:10px;border-radius:8px;border:1px solid var(--line)">
+            <select id="newAlertCol" style="flex:1;min-width:140px"></select>
+            <div style="display:flex;align-items:center;gap:4px">
+              <input type="number" id="newAlertDays" min="1" max="365" value="5" style="width:65px">
+              <span style="font-size:12px;color:var(--txt-dim)">dias</span>
+            </div>
+            <select id="newAlertCriteria" style="flex:1;min-width:160px">
+              <option value="statusChange">Sem mudança de coluna</option>
+              <option value="dataEdit">Sem edição de dados</option>
+              <option value="both">Sem mudança E sem edição</option>
+            </select>
+            <button class="btn solid" id="addAlertBtn" type="button" style="padding:6px 12px">＋ Adicionar</button>
+          </div>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--line);margin:4px 0">
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn danger" id="clearKanban">🧹 Limpar cache do Kanban</button>
           <button class="btn danger" id="clearNotes">🧹 Limpar cache das Notas</button>
@@ -719,6 +753,13 @@
         <button data-s="all">Todas</button>
         <button data-s="yes">Sincronizadas</button>
         <button data-s="no">Só locais</button>
+      </div>
+    </div>
+    <div class="mp-sec">
+      <div class="mp-h">Atenção / Inatividade</div>
+      <div class="mp-seg" id="fltAlert">
+        <button data-a="all">Todas</button>
+        <button data-a="alert">⚠️ Só em Alerta</button>
       </div>
     </div>
     <div class="mp-sec">
@@ -801,7 +842,7 @@ const $ = s => document.querySelector(s);
 const uid = () => 'c'+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
 // Versão: v<base>.<nº de commits em main no GitHub>. Bump manual do nº a cada commit novo
 // (git log --oneline | wc -l). Sem build step aqui, então não dá pra calcular sozinho em runtime.
-const APP_VERSION = 'v1.0.44';
+const APP_VERSION = 'v1.0.45';
 const KEY = 'kanban_ciss_v1';
 const COLORS = ['#5b8cff','#3fb950','#d6a533','#a371f7','#39c5cf','#e5534b','#ec6cb9'];
 const NO_STATUS = 'Sem status';   // coluna sintética = status vazio na planilha
@@ -815,7 +856,7 @@ function load(){
     cols:[],   // começa sem colunas; cria ao importar ou no "+ Coluna"
     endpoint:'', tab:'', theme:'dark', filter:{prio:[],sync:'all',hidden:[]},
     view:'board', notesMode:'app', notes:{folders:[{id:'nf1', name:'Geral', notes:[]}], active:null},
-    sortBy:'manual'
+    sortBy:'manual', inactivityAlerts:[]
   };
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
@@ -827,6 +868,7 @@ if(!state.syncLog) state.syncLog=[];
 if(!state.actionLog) state.actionLog=[];
 if(!state.autoBackup) state.autoBackup={enabled:false,freq:'daily',hours:4,time:'08:00',lastRun:0};
 if(!state.sortBy) state.sortBy='manual';
+if(!state.inactivityAlerts) state.inactivityAlerts=[];
 let query='';
 
 // ---------- RENDER ----------
@@ -837,7 +879,7 @@ function render(){
   const hidden = (state.filter&&state.filter.hidden)||[];
   state.cols.forEach(col=>{
     if(hidden.includes(col.id)) return;            // coluna oculta pelo filtro
-    const visible = col.cards.filter(c=>matchQ(c)&&matchFilter(c));
+    const visible = col.cards.filter(c=>matchQ(c)&&matchFilter(c, col));
     if(query && !visible.length) return;           // pesquisando: só mostra colunas com resultado
     const el = document.createElement('div');
     el.className='col'; el.dataset.col=col.id;
@@ -884,11 +926,49 @@ function updateTotal(){
   const n = state.cols.reduce((s,c)=>s+c.cards.length,0);   // total real, ignora filtros/busca
   $('#totalCount').textContent = n + (n===1?' tarefa':' tarefas');
 }
-const matchFilter = c => {
+function getCardAlert(card, col){
+  if(!state.inactivityAlerts || !state.inactivityAlerts.length || !col) return null;
+  const colNameLower = (col.name||'').trim().toLowerCase();
+  const rule = state.inactivityAlerts.find(r => r.colId === col.id || (r.colName && r.colName.trim().toLowerCase() === colNameLower));
+  if(!rule || !rule.days || rule.days <= 0) return null;
+
+  const now = Date.now();
+  const statusTime = card.statusChangedAt || card.updatedAt || card.createdAt || now;
+  const editTime = card.updatedAt || card.createdAt || now;
+
+  const daysStatus = (now - statusTime) / (1000 * 60 * 60 * 24);
+  const daysEdit = (now - editTime) / (1000 * 60 * 60 * 24);
+
+  let triggered = false;
+  let reason = '';
+  const reqDays = parseInt(rule.days, 10);
+
+  if(rule.criteria === 'dataEdit'){
+    triggered = (daysEdit >= reqDays);
+    reason = `${Math.floor(daysEdit)}d sem edição`;
+  } else if(rule.criteria === 'both'){
+    triggered = (daysStatus >= reqDays && daysEdit >= reqDays);
+    reason = `${Math.floor(Math.min(daysStatus, daysEdit))}d sem alteração`;
+  } else {
+    // default: statusChange
+    triggered = (daysStatus >= reqDays);
+    reason = `${Math.floor(daysStatus)}d sem mudança de coluna`;
+  }
+
+  if(!triggered) return null;
+  const elapsed = Math.floor(rule.criteria === 'dataEdit' ? daysEdit : (rule.criteria === 'both' ? Math.min(daysStatus, daysEdit) : daysStatus));
+  return { days: elapsed, reqDays, reason, rule };
+}
+
+const matchFilter = (c, colObj) => {
   const f = state.filter||{};
   if(f.prio && f.prio.length && !f.prio.includes(c.prio||'none')) return false;
   if(f.sync==='yes' && !c.linked) return false;
   if(f.sync==='no'  &&  c.linked) return false;
+  if(f.alert==='alert'){
+    const col = colObj || findColOfCard(c.id);
+    if(!col || !getCardAlert(c, col)) return false;
+  }
   return true;
 };
 
@@ -949,7 +1029,7 @@ function applySortNow(){
 }
 function updateFilterBadge(){
   const f = state.filter||{};
-  const n = (f.prio?f.prio.length:0) + ((f.sync&&f.sync!=='all')?1:0) + (f.hidden?f.hidden.length:0);
+  const n = (f.prio?f.prio.length:0) + ((f.sync&&f.sync!=='all')?1:0) + ((f.alert&&f.alert!=='all')?1:0) + (f.hidden?f.hidden.length:0);
   const b=$('#fltBadge');
   if(n){ b.textContent=n; b.hidden=false; $('#filterBtn').classList.add('active'); }
   else { b.hidden=true; $('#filterBtn').classList.remove('active'); }
@@ -985,7 +1065,14 @@ function cardEl(card, colId){
       ? `<span class="chip sync-err" title="${esc(card.syncError)} — ${card.syncErrorIgnored?'reprocessamento ignorado':((card.syncRetryCount||0)>=MAX_AUTO_RETRIES?'reprocessamento automático pausado (limite atingido)':'reprocessando automaticamente…')}">⚠ Erro de sync</span>`
       : `<span class="chip linked">⟳ Sincronizado</span>`);
   }
-  
+
+  const colObj = state.cols.find(c => c.id === colId);
+  const alertData = colObj ? getCardAlert(card, colObj) : null;
+  if(alertData){
+    el.classList.add('inactive-alert');
+    chips.push(`<span class="chip alert" title="Atenção: ${alertData.days} dia(s) neste status (${alertData.reason}) — Limite configurado: ${alertData.reqDays} dias">⚠ Revisar: ${alertData.days}d sem alteração</span>`);
+  }
+
   const hasNotes = !!(card.localNotes && card.localNotes.trim());
   el.innerHTML = `
     <div class="bar" style="background:${pr.c==='transparent'?'var(--accent)':pr.c}"></div>
@@ -1084,7 +1171,7 @@ function addCard(colId, title){
   const cb = document.querySelector('[data-addsync="'+colId+'"]');
   const sync = !!(cb && cb.checked && state.endpoint);    // o flag é decidido aqui, na criação
   const now = Date.now();
-  const card = {id:uid(), title, desc:'', ticket:'', cli:'', prio:'none', linked:sync, createdAt:now, updatedAt:now};
+  const card = {id:uid(), title, desc:'', ticket:'', cli:'', prio:'none', linked:sync, createdAt:now, updatedAt:now, statusChangedAt:now};
   if(state.sortBy && state.sortBy!=='manual') insertBySortKey(col, card);
   else col.cards.unshift(card);
   save(); render();
@@ -1098,7 +1185,7 @@ function moveCard(id, fromCol, toCol, order){
   const [card] = from.cards.splice(idx,1);
   to.cards.push(card);
   to.cards.sort((a,b)=> order.indexOf(a.id)-order.indexOf(b.id));
-  if(fromCol!==toCol) card.updatedAt = Date.now();
+  if(fromCol!==toCol) { card.updatedAt = Date.now(); card.statusChangedAt = Date.now(); }
   save(); render();
   if(fromCol!==toCol) logAction('move', card.id, card.title, `Movida de ${from.name} para ${to.name}`);
   if(card.linked && fromCol!==toCol) pushStatus(card, to.name);
@@ -1270,6 +1357,7 @@ function saveCard(pushAfter){
     if(col) insertBySortKey(col, editing.card);
   }
   editing.card.updatedAt = Date.now();
+  if(colChanged) editing.card.statusChangedAt = Date.now();
   $('#cardMetaDates').textContent = `Criado ${fmtWhen(editing.card.createdAt)} · Editado ${fmtWhen(editing.card.updatedAt)}`;
   save(); render();
   logAction('edit', editing.card.id, editing.card.title, 'Tarefa editada/atualizada');
@@ -1527,13 +1615,13 @@ async function pullSheet(){
         c.title=row.assunto||c.title; c.cli=row.cliente||c.cli; c.desc=row.obs||c.desc;
         c.jira=String(row.jira||'')||c.jira; c.atrib=String(row.atrib||c.atrib||'');
         c.linked=true; c.rowKey=key||c.rowKey; c.ticket=String(row.ticket||c.ticket||'');
-        if(hit.col!==col){ hit.col.cards.splice(hit.col.cards.indexOf(c),1); col.cards.push(c); moved++; }
+        if(hit.col!==col){ hit.col.cards.splice(hit.col.cards.indexOf(c),1); col.cards.push(c); c.statusChangedAt = Date.now(); moved++; }
         else updated++;
       }else{
         const nowPull = Date.now();
         col.cards.unshift({id:uid(), title:row.assunto||('Ticket '+(row.ticket||'')), desc:row.obs||'',
           ticket:String(row.ticket||''), cli:row.cliente||'', jira:String(row.jira||''), atrib:String(row.atrib||''),
-          prio:'none', linked:true, rowKey:key||row.ticket, createdAt:nowPull, updatedAt:nowPull});
+          prio:'none', linked:true, rowKey:key||row.ticket, createdAt:nowPull, updatedAt:nowPull, statusChangedAt:nowPull});
         added++;
       }
     });
@@ -1594,7 +1682,52 @@ $('#clearNotes').onclick=async()=>{
 
 // ---------- SETTINGS ----------
 function closeSet(){ $('#setOv').classList.remove('show'); }
-$('#settingsBtn').onclick=()=>{ $('#fEndpoint').value=state.endpoint; $('#fTab').value=state.tab; $('#fSortBy').value=state.sortBy||'manual'; $('#setMsg').textContent=''; populateAbFields(); $('#setOv').classList.add('show'); };
+function populateAlertCols(){
+  const sel = $('#newAlertCol'); if(!sel) return;
+  sel.innerHTML = state.cols.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+}
+function populateAlertsList(){
+  const container = $('#alertsList'); if(!container) return;
+  const list = state.inactivityAlerts || [];
+  if(!list.length){
+    container.innerHTML = `<div style="font-size:12px;color:var(--txt-dim);font-style:italic">Nenhum alerta de inatividade configurado.</div>`;
+    return;
+  }
+  container.innerHTML = list.map((r, i) => {
+    const critLabel = r.criteria === 'dataEdit' ? 'sem edição' : (r.criteria === 'both' ? 'sem mudança e sem edição' : 'sem mudança de coluna');
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg-2);padding:8px 12px;border-radius:6px;border:1px solid var(--line);font-size:13px">
+        <div>
+          <b>${esc(r.colName || 'Status')}</b>: alertar após <span style="color:var(--red);font-weight:700">${r.days} dia(s)</span> (${critLabel})
+        </div>
+        <button class="btn ghost danger" style="padding:3px 8px;font-size:11px" onclick="removeAlertRule(${i})">Remover</button>
+      </div>`;
+  }).join('');
+}
+window.removeAlertRule = function(index){
+  if(state.inactivityAlerts && state.inactivityAlerts[index]){
+    state.inactivityAlerts.splice(index, 1);
+    save();
+    populateAlertsList();
+    render();
+  }
+};
+$('#addAlertBtn').onclick = () => {
+  const colId = $('#newAlertCol').value;
+  const days = parseInt($('#newAlertDays').value, 10);
+  const criteria = $('#newAlertCriteria').value;
+  const colObj = state.cols.find(c => c.id === colId);
+  if(!colObj || !days || days <= 0) return;
+  if(!state.inactivityAlerts) state.inactivityAlerts = [];
+  const existingIdx = state.inactivityAlerts.findIndex(r => r.colId === colId);
+  const ruleObj = { id: uid(), colId: colObj.id, colName: colObj.name, days, criteria };
+  if(existingIdx >= 0) state.inactivityAlerts[existingIdx] = ruleObj;
+  else state.inactivityAlerts.push(ruleObj);
+  save();
+  populateAlertsList();
+  render();
+};
+$('#settingsBtn').onclick=()=>{ $('#fEndpoint').value=state.endpoint; $('#fTab').value=state.tab; $('#fSortBy').value=state.sortBy||'manual'; $('#setMsg').textContent=''; populateAbFields(); populateAlertCols(); populateAlertsList(); $('#setOv').classList.add('show'); };
 $('#setClose').onclick=closeSet;
 $('#setOv').onmousedown=e=>{ if(e.target.id==='setOv') $('#setClose').onclick(); };
 $('#fSortBy').onchange=()=>{ state.sortBy=$('#fSortBy').value; save(); render(); applySortNow(); };
@@ -1626,6 +1759,7 @@ function openFilterPop(){
   const pop=$('#filterPop');
   pop.querySelectorAll('#fltPrio button').forEach(b=> b.classList.toggle('on',(state.filter.prio||[]).includes(b.dataset.p)));
   pop.querySelectorAll('#fltSync button').forEach(b=> b.classList.toggle('on',(state.filter.sync||'all')===b.dataset.s));
+  pop.querySelectorAll('#fltAlert button').forEach(b=> b.classList.toggle('on',(state.filter.alert||'all')===b.dataset.a));
   $('#fltCols').innerHTML = state.cols.map(c=>`<label class="mp-col"><span class="dot" style="background:${c.color}"></span><span class="nm">${esc(c.name)}</span><input type="checkbox" data-colvis="${c.id}" ${(state.filter.hidden||[]).includes(c.id)?'':'checked'}></label>`).join('');
   $('#fltCols').querySelectorAll('input').forEach(inp=> inp.onchange=()=>{ const id=inp.dataset.colvis; const h=new Set(state.filter.hidden||[]); inp.checked?h.delete(id):h.add(id); state.filter.hidden=[...h]; save(); render(); });
   const r=$('#filterBtn').getBoundingClientRect();
@@ -1635,7 +1769,8 @@ function openFilterPop(){
 $('#filterBtn').onclick=e=>{ e.stopPropagation(); const p=$('#filterPop'); p.classList.contains('show')?p.classList.remove('show'):openFilterPop(); };
 document.querySelectorAll('#fltPrio button').forEach(b=> b.onclick=()=>{ const s=new Set(state.filter.prio||[]); s.has(b.dataset.p)?s.delete(b.dataset.p):s.add(b.dataset.p); state.filter.prio=[...s]; b.classList.toggle('on'); save(); render(); });
 document.querySelectorAll('#fltSync button').forEach(b=> b.onclick=()=>{ state.filter.sync=b.dataset.s; document.querySelectorAll('#fltSync button').forEach(x=>x.classList.toggle('on',x===b)); save(); render(); });
-$('#fltClear').onclick=()=>{ state.filter={prio:[],sync:'all',hidden:[]}; save(); render(); openFilterPop(); };
+document.querySelectorAll('#fltAlert button').forEach(b=> b.onclick=()=>{ state.filter.alert=b.dataset.a; document.querySelectorAll('#fltAlert button').forEach(x=>x.classList.toggle('on',x===b)); save(); render(); });
+$('#fltClear').onclick=()=>{ state.filter={prio:[],sync:'all',alert:'all',hidden:[]}; save(); render(); openFilterPop(); };
 
 function openColorPop(colId, anchor){
   const col=state.cols.find(c=>c.id===colId); if(!col) return;
