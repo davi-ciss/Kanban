@@ -719,7 +719,10 @@
               <p class="hint" style="margin:0">Destaca em <b>vermelho</b> tarefas paradas há mais de X dias numa coluna.</p>
               <div id="alertsList" style="display:flex;flex-direction:column;gap:6px"></div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:var(--bg-2);padding:8px;border-radius:8px;border:1px solid var(--line)">
-                <select id="newAlertCol" style="flex:1;min-width:100px;font-size:12px;padding:5px 7px"></select>
+                <div class="custom-select" id="newAlertColSelect" tabindex="0" data-val="" style="flex:1;min-width:130px;background:var(--bg)">
+                  <div class="cs-val" id="alertColVal" style="min-height:28px;padding:4px 8px;font-size:12px"></div>
+                  <div class="cs-opts" id="alertColOpts"></div>
+                </div>
                 <div style="display:flex;align-items:center;gap:3px">
                   <input type="number" id="newAlertDays" min="1" max="365" value="5" style="width:48px;font-size:12px;padding:5px 5px">
                   <span style="font-size:11px;color:var(--txt-dim)">dias</span>
@@ -877,7 +880,7 @@ const $ = s => document.querySelector(s);
 const uid = () => 'c'+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
 // Versão: v<base>.<nº de commits em main no GitHub>. Bump manual do nº a cada commit novo
 // (git log --oneline | wc -l). Sem build step aqui, então não dá pra calcular sozinho em runtime.
-const APP_VERSION = 'v1.0.47';
+const APP_VERSION = 'v1.0.48';
 const KEY = 'kanban_ciss_v1';
 const COLORS = ['#5b8cff','#3fb950','#d6a533','#a371f7','#39c5cf','#e5534b','#ec6cb9'];
 const NO_STATUS = 'Sem status';   // coluna sintética = status vazio na planilha
@@ -1717,9 +1720,55 @@ $('#clearNotes').onclick=async()=>{
 
 // ---------- SETTINGS ----------
 function closeSet(){ $('#setOv').classList.remove('show'); }
+function renderAlertColUI(selId){
+  const selEl = $('#newAlertColSelect'); const valEl = $('#alertColVal'); const optsEl = $('#alertColOpts');
+  if(!selEl || !valEl || !optsEl) return;
+  const sCol = state.cols.find(c=>c.id===selId) || state.cols[0];
+  if(!sCol) return;
+  selEl.dataset.val = sCol.id;
+  valEl.innerHTML = `<span class="cs-dot" style="background:${sCol.color}"></span><span style="font-weight:600;color:${sCol.color}">${esc(sCol.name)}</span>`;
+  optsEl.innerHTML = state.cols.map(c=>{
+    const isSel = c.id === sCol.id;
+    return `<div class="cs-opt" data-v="${c.id}" style="background:${isSel?c.color+'22':''}">
+      <span class="cs-dot" style="background:${c.color}"></span><span style="font-weight:${isSel?'600':'500'};color:${isSel?c.color:'var(--txt)'}">${esc(c.name)}</span>
+    </div>`;
+  }).join('');
+  optsEl.querySelectorAll('.cs-opt').forEach(opt => {
+    opt.onclick = (ev) => {
+      ev.stopPropagation();
+      renderAlertColUI(opt.dataset.v);
+      optsEl.classList.remove('show-pop');
+      selEl.classList.remove('open');
+    };
+  });
+}
 function populateAlertCols(){
-  const sel = $('#newAlertCol'); if(!sel) return;
-  sel.innerHTML = state.cols.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  if(state.cols && state.cols.length){
+    const selEl = $('#newAlertColSelect');
+    const currentSel = (selEl && selEl.dataset.val) ? selEl.dataset.val : state.cols[0].id;
+    renderAlertColUI(currentSel);
+  }
+}
+const alertColSelect = $('#newAlertColSelect');
+if(alertColSelect){
+  alertColSelect.onclick = (e) => {
+    e.stopPropagation();
+    const selEl = $('#newAlertColSelect'); const optsEl = $('#alertColOpts');
+    if(selEl.classList.contains('open')){
+      selEl.classList.remove('open'); optsEl.classList.remove('show-pop');
+    } else {
+      document.body.appendChild(optsEl);
+      const r = selEl.getBoundingClientRect();
+      optsEl.style.top = (r.bottom + 4) + 'px';
+      optsEl.style.left = r.left + 'px';
+      optsEl.style.width = Math.max(r.width, 180) + 'px';
+      selEl.classList.add('open'); optsEl.classList.add('show-pop');
+    }
+  };
+  alertColSelect.onblur = () => setTimeout(()=>{
+    const selEl = $('#newAlertColSelect'); const optsEl = $('#alertColOpts');
+    if(selEl && optsEl){ selEl.classList.remove('open'); optsEl.classList.remove('show-pop'); }
+  }, 150);
 }
 function populateAlertsList(){
   const container = $('#alertsList'); if(!container) return;
@@ -1730,12 +1779,15 @@ function populateAlertsList(){
   }
   container.innerHTML = list.map((r, i) => {
     const critLabel = r.criteria === 'dataEdit' ? 'sem edição' : (r.criteria === 'both' ? 'sem mudança e sem edição' : 'sem mudança de coluna');
+    const colObj = state.cols.find(c => c.id === r.colId || (c.name && c.name.toLowerCase() === String(r.colName||'').toLowerCase()));
+    const colColor = colObj ? colObj.color : 'var(--accent)';
     return `
-      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg-2);padding:8px 12px;border-radius:6px;border:1px solid var(--line);font-size:13px">
-        <div>
-          <b>${esc(r.colName || 'Status')}</b>: alertar após <span style="color:var(--red);font-weight:700">${r.days} dia(s)</span> (${critLabel})
+      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg-2);padding:6px 10px;border-radius:6px;border:1px solid var(--line);font-size:12.5px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="cs-dot" style="background:${colColor};flex:none"></span>
+          <b style="color:${colColor}">${esc(r.colName || 'Status')}</b>: alertar após <span style="color:var(--red);font-weight:700">${r.days} dia(s)</span> (${critLabel})
         </div>
-        <button class="btn ghost danger" style="padding:3px 8px;font-size:11px" onclick="removeAlertRule(${i})">Remover</button>
+        <button class="btn ghost danger" style="padding:3px 7px;font-size:11px" onclick="removeAlertRule(${i})">Remover</button>
       </div>`;
   }).join('');
 }
@@ -1748,7 +1800,8 @@ window.removeAlertRule = function(index){
   }
 };
 $('#addAlertBtn').onclick = () => {
-  const colId = $('#newAlertCol').value;
+  const selEl = $('#newAlertColSelect');
+  const colId = selEl ? selEl.dataset.val : '';
   const days = parseInt($('#newAlertDays').value, 10);
   const criteria = $('#newAlertCriteria').value;
   const colObj = state.cols.find(c => c.id === colId);
@@ -1824,6 +1877,9 @@ document.addEventListener('click',e=>{
   if(!e.target.closest('#histPanel') && !e.target.closest('#histBtn')) $('#histPanel').classList.remove('show');
   if(!e.target.closest('#cardTooltip') && !e.target.closest('.card')) hideCardTooltipNow();
   if(!e.target.closest('#cliLinkPop') && !e.target.closest('#cliLinkBtn')) closeCliLinkPop();
+  if(!e.target.closest('#newAlertColSelect') && !e.target.closest('#alertColOpts')) {
+    const s=$('#newAlertColSelect'), o=$('#alertColOpts'); if(s&&o){ s.classList.remove('open'); o.classList.remove('show-pop'); }
+  }
 });
 
 // ---------- TOOLTIP DO CARD (hover 1s → mostra Observação + Nota local) ----------
