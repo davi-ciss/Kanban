@@ -37,7 +37,7 @@ O card só vira linha na planilha quando você ativa a sincronização. Para hab
 
 ### 1. Publicar o endpoint (uma vez, ~1 min)
 1. Abra a planilha de acompanhamento → menu **Extensões > Apps Script**.
-2. Use o arquivo **`Apoios N3/KanbanAPI.gs`** (cole/atualize no projeto da planilha) e salve.
+2. Use o arquivo **`Apps Scripts/Comite.gs`** (cole/atualize no projeto da planilha — é um arquivo único com API + painel + sync) e salve.
 3. **Implantar > Nova implantação** → engrenagem → **Aplicativo da Web**.
    - *Executar como:* **Eu**
    - *Quem pode acessar:* **Qualquer pessoa**

@@ -880,7 +880,7 @@ const $ = s => document.querySelector(s);
 const uid = () => 'c'+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
 // Versão: v<base>.<nº de commits em main no GitHub>. Bump manual do nº a cada commit novo
 // (git log --oneline | wc -l). Sem build step aqui, então não dá pra calcular sozinho em runtime.
-const APP_VERSION = 'v1.0.49';
+const APP_VERSION = 'v1.0.50';
 const KEY = 'kanban_ciss_v1';
 const COLORS = ['#5b8cff','#3fb950','#d6a533','#a371f7','#39c5cf','#e5534b','#ec6cb9'];
 const NO_STATUS = 'Sem status';   // coluna sintética = status vazio na planilha
