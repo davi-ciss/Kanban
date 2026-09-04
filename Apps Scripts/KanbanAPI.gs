@@ -295,49 +295,91 @@ function kbStatuses_(sh){
   return [];
 }
 
+// Texto normalizado p/ comparar Assunto: minúsculo, sem acento, espaços/quebras colapsados.
+function kbTxt_(v){ return kbNorm_(v).replace(/\s+/g,' '); }
+
+/**
+ * Exclui a linha da tarefa na aba do analista.
+ *
+ * NUNCA apaga por posição sem conferir: número de linha NÃO é identidade estável —
+ * qualquer inclusão/exclusão acima (aqui, no menu Ações ou manual) desloca tudo, e a
+ * key "R<n>" guardada no card fica velha. Ordem de identificação:
+ *   1) Ticket (mais forte)  2) key "R<n>" CONFERIDA  3) Assunto normalizado
+ *      (assunto atual do card e, se veio, o assunto da última sincronização — cobre card renomeado).
+ * Sem prova de que a linha é a certa, não apaga nada e devolve local:false pro Kanban avisar.
+ */
 function kbDelete_(sh, q){
   var idx = kbHeaderIndex_(sh);
   if(idx.ticket < 0 && idx.assunto < 0) return {ok:false, error:'Coluna Ticket/Assunto não encontrada'};
 
-  var rawKey = String(q.key==null?'':q.key).trim();
-  var mR = rawKey.match(/^(?:R|row)(\d+)$/i);
-  if(mR){
-    var rn = parseInt(mR[1],10);
-    if(rn>=2 && rn<=sh.getLastRow()){ sh.deleteRow(rn); return {ok:true, deleted:'R'+rn, local:true, fabrica:false}; }
+  var lastRow = sh.getLastRow();
+  if(lastRow < 2) return {ok:true, deleted:'', local:false, fabrica:false, motivo:'aba sem linhas'};
+
+  var rawKey       = String(q.key==null?'':q.key).trim();
+  var ticketDigits = kbDigits_(q.ticket || (rawKey.match(/^\d+$/) ? rawKey : ''));
+  var assAlvos     = [];                                   // assuntos aceitos, em ordem de preferência
+  [q.assunto, q.title, q.assuntoAnt].forEach(function(v){
+    var t = kbTxt_(v || '');
+    if(t && assAlvos.indexOf(t) === -1) assAlvos.push(t);
+  });
+
+  var colT = idx.ticket  >= 0 ? sh.getRange(2, idx.ticket+1,  lastRow-1, 1).getValues() : null;
+  var colA = idx.assunto >= 0 ? sh.getRange(2, idx.assunto+1, lastRow-1, 1).getValues() : null;
+
+  var alvo = -1, via = '';
+
+  // 1) Ticket
+  if(ticketDigits && colT){
+    for(var i=0;i<colT.length;i++){
+      if(kbDigits_(colT[i][0]) === ticketDigits){ alvo = i+2; via = 'ticket'; break; }
+    }
   }
 
-  var ticketDigits = kbDigits_(q.ticket || (rawKey.match(/^\d+$/)?rawKey:''));
-  var deletedLocal = false, deletedFabrica = false;
-  var lastRow = sh.getLastRow();
-
-  if(ticketDigits && idx.ticket>=0 && lastRow>=2){
-    var colT = sh.getRange(2, idx.ticket+1, lastRow-1, 1).getValues();
-    for(var i=0;i<colT.length;i++){
-      if(kbDigits_(colT[i][0]) === ticketDigits){ sh.deleteRow(i+2); deletedLocal = true; break; }
-    }
-  } else if(!ticketDigits && lastRow>=2 && idx.assunto>=0){
-    var assTarget = String(q.assunto || q.title || rawKey).trim().toLowerCase();
-    if(assTarget){
-      var colA = sh.getRange(2, idx.assunto+1, lastRow-1, 1).getValues();
-      for(var k=0;k<colA.length;k++){
-        if(String(colA[k][0]||'').trim().toLowerCase() === assTarget){ sh.deleteRow(k+2); deletedLocal = true; break; }
+  // 2) key "R<n>" — só vale se a linha AINDA for a mesma tarefa
+  if(alvo === -1){
+    var mR = rawKey.match(/^(?:R|row)(\d+)$/i);
+    if(mR){
+      var rn = parseInt(mR[1],10);
+      if(rn >= 2 && rn <= lastRow){
+        var tLin = colT ? kbDigits_(colT[rn-2][0]) : '';
+        var aLin = colA ? kbTxt_(colA[rn-2][0])    : '';
+        var confere = ticketDigits ? (tLin === ticketDigits)
+                                   : (assAlvos.length ? (assAlvos.indexOf(aLin) !== -1) : false);
+        if(confere){ alvo = rn; via = 'linha'; }
       }
     }
   }
 
-  if(ticketDigits){
+  // 3) Assunto normalizado — é por aqui que cai o card SEM ticket
+  if(alvo === -1 && colA && assAlvos.length){
+    for(var t=0; t<assAlvos.length && alvo===-1; t++){
+      for(var k=0;k<colA.length;k++){
+        if(kbTxt_(colA[k][0]) === assAlvos[t]){ alvo = k+2; via = 'assunto'; break; }
+      }
+    }
+  }
+
+  if(alvo === -1)
+    return {ok:true, deleted:'', local:false, fabrica:false, motivo:'linha não localizada na aba '+sh.getName()};
+
+  // Ticket REAL da linha: o card pode estar sem ticket e a linha ter (então a Fábrica também tem).
+  var ticketLinha = colT ? kbDigits_(colT[alvo-2][0]) : '';
+  sh.deleteRow(alvo);
+
+  var deletedFabrica = false;
+  if(ticketLinha){
     try{
       var fab = SpreadsheetApp.openById(FABRICA_ID).getSheetByName("Apoios");
       var a = kbApoiosIdx_(fab);
       var ult = fab.getLastRow();
       if(a.ticket >= 0 && ult >= 2){
-        var dados = fab.getRange(1, a.ticket+1, ult, 1).getValues();
+        var dados = fab.getRange(2, a.ticket+1, ult-1, 1).getValues();
         for(var j=0;j<dados.length;j++){
-          if(kbDigits_(dados[j][0]) === ticketDigits){ fab.deleteRow(j+1); deletedFabrica = true; break; }
+          if(kbDigits_(dados[j][0]) === ticketLinha){ fab.deleteRow(j+2); deletedFabrica = true; break; }
         }
       }
     }catch(err){ /* Fábrica indisponível */ }
   }
 
-  return {ok:true, deleted:ticketDigits||rawKey||'assunto', local:deletedLocal, fabrica:deletedFabrica};
+  return {ok:true, deleted:ticketLinha || ('R'+alvo), local:true, fabrica:deletedFabrica, via:via};
 }

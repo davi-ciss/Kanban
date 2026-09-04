@@ -71,7 +71,19 @@ function excluirTicketComite() {
   if (row <= 1) { ui.alert("Aviso", "Você não pode excluir a linha de cabeçalho.", ui.ButtonSet.OK); return; }
 
   var ticketId = sheet.getRange(row, ix.ticket + 1).getValue();
-  if (!ticketId) { ui.alert("Aviso", "Nenhum ticket encontrado na linha selecionada.", ui.ButtonSet.OK); return; }
+
+  // Linha sem ticket (tarefa interna, criada direto no Kanban): existe só nesta aba,
+  // não há nada correspondente na Fábrica — confirma e apaga só aqui.
+  if (!ticketId) {
+    var assuntoLinha = String(sheet.getRange(row, ix.assunto + 1).getValue() || '').trim();
+    var r1 = ui.alert('Confirmar Exclusão',
+      'Esta linha não tem ticket.\n\nExcluir permanentemente a linha ' + row +
+      (assuntoLinha ? ' ("' + assuntoLinha + '")' : '') + ' desta aba?', ui.ButtonSet.YES_NO);
+    if (r1 != ui.Button.YES) return;
+    sheet.deleteRow(row);
+    SpreadsheetApp.getActiveSpreadsheet().toast('Linha ' + row + ' excluída (sem ticket, nada a remover na Fábrica).', 'Sucesso', 5);
+    return;
+  }
 
   var numTicket = ticketId.toString().match(/(\d+)/); numTicket = numTicket ? numTicket[1] : ticketId;
   var resp = ui.alert('Confirmar Exclusão', 'Excluir permanentemente o ticket ' + numTicket + ' de AMBAS as planilhas?', ui.ButtonSet.YES_NO);

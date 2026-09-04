@@ -880,7 +880,7 @@ const $ = s => document.querySelector(s);
 const uid = () => 'c'+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-3);
 // Versão: v<base>.<nº de commits em main no GitHub>. Bump manual do nº a cada commit novo
 // (git log --oneline | wc -l). Sem build step aqui, então não dá pra calcular sozinho em runtime.
-const APP_VERSION = 'v1.0.48';
+const APP_VERSION = 'v1.0.49';
 const KEY = 'kanban_ciss_v1';
 const COLORS = ['#5b8cff','#3fb950','#d6a533','#a371f7','#39c5cf','#e5534b','#ec6cb9'];
 const NO_STATUS = 'Sem status';   // coluna sintética = status vazio na planilha
@@ -911,7 +911,32 @@ let query='';
 
 // ---------- RENDER ----------
 const board = $('#board');
+// render() reconstrói o board inteiro (innerHTML=''), então zera o scroll horizontal do
+// board e o vertical de cada coluna. Como todo push pro Sheets termina em render(), sem
+// guardar/restaurar isso o quadro "pula" pro topo a cada sincronização.
+function snapScroll(){
+  const s = {h:board.scrollLeft, cols:{}, focus:null};
+  document.querySelectorAll('#board .col').forEach(el=>{
+    const box = el.querySelector('.cards');
+    if(box && box.scrollTop) s.cols[el.dataset.col] = box.scrollTop;
+  });
+  const ae = document.activeElement;
+  if(ae && ae.dataset && ae.dataset.add) s.focus = {col:ae.dataset.add, pos:ae.selectionStart};
+  return s;
+}
+function restoreScroll(s){
+  board.scrollLeft = s.h;
+  for(const id in s.cols){
+    const box = document.querySelector(`.col[data-col="${id}"] .cards`);
+    if(box) box.scrollTop = s.cols[id];
+  }
+  if(s.focus){
+    const ta = document.querySelector(`[data-add="${s.focus.col}"]`);
+    if(ta){ ta.focus(); try{ ta.setSelectionRange(s.focus.pos, s.focus.pos); }catch(e){} }
+  }
+}
 function render(){
+  const scroll = snapScroll();
   document.body.dataset.theme = state.theme;
   board.innerHTML='';
   const hidden = (state.filter&&state.filter.hidden)||[];
@@ -954,6 +979,7 @@ function render(){
   addc.className='add-col'; addc.id='addColInline'; addc.innerHTML='＋ Nova coluna';
   addc.onclick = addColumn;
   board.appendChild(addc);
+  restoreScroll(scroll);
   wireBoard();
   updateSyncPill();
   updateArrows();
@@ -1410,8 +1436,11 @@ function delCard(){
   if(!editing) return;
   const card = editing.card;
   const synced = card.linked && state.endpoint;
+  const alvo = card.ticket
+    ? `a linha do ticket ${card.ticket} também será EXCLUÍDA da planilha (aba ${state.tab} e Fábrica)`
+    : `a linha com o assunto "${card.title}" também será EXCLUÍDA da planilha (aba ${state.tab})`;
   const aviso = synced
-    ? `Excluir "${card.title}"?\n\n⚠ Este card está sincronizado — a linha do ticket ${card.ticket||'(sem nº)'} também será EXCLUÍDA da planilha (aba ${state.tab} e Fábrica). Não dá pra desfazer.`
+    ? `Excluir "${card.title}"?\n\n⚠ Este card está sincronizado — ${alvo}. Não dá pra desfazer.`
     : `Excluir "${card.title}"?\n\nEsta ação não pode ser desfeita.`;
   if(!confirm(aviso)) return;
   clearTimeout(autoRetryTimers[card.id]); delete autoRetryTimers[card.id];   // para o reprocessamento automático do card excluído
@@ -1419,11 +1448,17 @@ function delCard(){
   col.cards = col.cards.filter(c=>c.id!==card.id); save(); render(); closeCard();
   logAction('delete', card.id, card.title, `Excluída de ${col.name}`);
   if(synced){
-    jsonp({action:'delete', key:card.rowKey||card.ticket||'', ticket:card.ticket||'', assunto:card.title||''})
+    // assuntoAnt = assunto como está NA PLANILHA (última sincronização): se o card foi
+    // renomeado depois de vinculado, é por ele que o Apps Script acha a linha.
+    jsonp({action:'delete', key:card.rowKey||card.ticket||'', ticket:card.ticket||'',
+           assunto:card.title||'', assuntoAnt:card.sheetTitle||''})
       .then(r=>{
-        const ok=r&&r.ok;
-        toast(ok ? (r.deleted&&(r.local||r.fabrica) ? '✓ Excluído da planilha' : 'Card excluído (linha não encontrada na planilha)') : '⚠ '+((r&&r.error)||'Erro ao excluir na planilha'));
-        logSync({cardId:card.id,title:card.title,ticket:card.ticket,action:'delete',ok,error:ok?'':((r&&r.error)||'Erro')});
+        const ok=r&&r.ok, achou=!!(ok&&r.local);
+        const naoAchou='Linha não encontrada na planilha — exclua manualmente na aba '+state.tab;
+        toast(ok ? (achou ? '✓ Excluído da planilha' : '⚠ Card excluído aqui, mas a linha continua na planilha')
+                 : '⚠ '+((r&&r.error)||'Erro ao excluir na planilha'));
+        logSync({cardId:card.id,title:card.title,ticket:card.ticket,action:'delete',ok:achou,
+                 error: ok ? (achou?'':naoAchou) : ((r&&r.error)||'Erro')});
       })
       .catch(e=>{ toast('⚠ '+e); logSync({cardId:card.id,title:card.title,ticket:card.ticket,action:'delete',ok:false,error:String(e)}); });
   }
@@ -1541,7 +1576,9 @@ async function pushCard(card, status, silent){
     const r=await jsonp({action:'upsert', key:card.rowKey||card.ticket||'',
       ticket:card.ticket||'', assunto:card.title||'', cliente:card.cli||'',
       status:out, obs:card.desc||'', jira:card.jira||'', atrib:card.atrib||'', equipe:card.equipe||''});
-    if(r&&r.ok){ card.linked=true; card.rowKey=r.key||card.rowKey||card.ticket||''; card.syncError=null; card.syncRetryCount=0; card.syncErrorIgnored=false; save();
+    if(r&&r.ok){ card.linked=true; card.rowKey=r.key||card.rowKey||card.ticket||'';
+      card.sheetTitle=card.title||'';                       // assunto que ficou gravado na planilha (usado p/ achar a linha na exclusão)
+      card.syncError=null; card.syncRetryCount=0; card.syncErrorIgnored=false; save();
       toast('✓ Enviado ao Sheets'); logSync({cardId:card.id,title:card.title,ticket:card.ticket,action:'upsert',ok:true}); render(); return true;
     } else {
       const em=(r&&r.error)||'Erro ao enviar'; card.syncError=em; save();
@@ -1653,13 +1690,15 @@ async function pullSheet(){
         c.title=row.assunto||c.title; c.cli=row.cliente||c.cli; c.desc=row.obs||c.desc;
         c.jira=String(row.jira||'')||c.jira; c.atrib=String(row.atrib||c.atrib||'');
         c.linked=true; c.rowKey=key||c.rowKey; c.ticket=String(row.ticket||c.ticket||'');
+        c.sheetTitle=String(row.assunto||'')||c.sheetTitle||'';   // assunto como está na planilha
         if(hit.col!==col){ hit.col.cards.splice(hit.col.cards.indexOf(c),1); col.cards.push(c); c.statusChangedAt = Date.now(); moved++; }
         else updated++;
       }else{
         const nowPull = Date.now();
         col.cards.unshift({id:uid(), title:row.assunto||('Ticket '+(row.ticket||'')), desc:row.obs||'',
           ticket:String(row.ticket||''), cli:row.cliente||'', jira:String(row.jira||''), atrib:String(row.atrib||''),
-          prio:'none', linked:true, rowKey:key||row.ticket, createdAt:nowPull, updatedAt:nowPull, statusChangedAt:nowPull});
+          prio:'none', linked:true, rowKey:key||row.ticket, sheetTitle:String(row.assunto||''),
+          createdAt:nowPull, updatedAt:nowPull, statusChangedAt:nowPull});
         added++;
       }
     });

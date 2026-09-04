@@ -43,6 +43,15 @@ function feNorm_(x){ return String(x==null?'':x).toLowerCase().trim().normalize(
 // Extrai só os dígitos de um valor (ex. nº de ticket vindo de link ou texto misto)
 function feDigits_(v){ var m=String(v==null?'':v).match(/(\d+)/); return m?m[1]:String(v||'').trim(); }
 
+// "Pendente N3" no Comitê é gravado como "Pendente" na Apoios (kbPropagarFabrica_ / Scripts.gs).
+// Na VOLTA, esse "Pendente" não pode rebaixar quem já está "Pendente N3" — senão a aba do
+// analista perde o marcador de N3 a cada edição feita na Apoios. Só esse par é tratado;
+// qualquer outro status (Resolvido, Em Andamento, Transformado Defeito…) propaga normal.
+function feStatusParaComite_(statusFabrica, statusAtualComite){
+  if(feNorm_(statusFabrica) === 'pendente' && feNorm_(statusAtualComite) === 'pendente n3') return statusAtualComite;
+  return statusFabrica;
+}
+
 // Lê a linha 1 (cabeçalho) da aba sh e devolve o índice (0-based) de cada campo do colmap
 function feIdx_(sh, colmap){
   var lc=Math.max(1, sh.getLastColumn());
@@ -192,7 +201,8 @@ function processarEdicaoFabrica(e){
       for(var j=0;j<ids.length;j++){
         if(feDigits_(ids[j][0]) === alvo){    // achou a linha do ticket - atualiza
           var rr=j+2;
-          setC('status', rr, status);
+          var stComite = ci.status >= 0 ? ca.getRange(rr, ci.status+1).getValue() : '';
+          setC('status', rr, feStatusParaComite_(status, stComite));
           setC('assunto', rr, descricao);
           setCB('cliente', rr, cliente);
           setC('jira', rr, jira);
